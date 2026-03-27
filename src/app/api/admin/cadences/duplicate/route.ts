@@ -59,7 +59,10 @@ export async function POST(req: Request) {
   }
 
   if ((exists ?? []).length > 0) {
-    return NextResponse.json({ error: "Target cadence key already exists" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Target cadence key already exists" },
+      { status: 400 }
+    );
   }
 
   const { data: sourceTemplate, error: sourceTemplateErr } = await supabaseAdmin
@@ -69,7 +72,10 @@ export async function POST(req: Request) {
     .maybeSingle();
 
   if (sourceTemplateErr) {
-    return NextResponse.json({ error: sourceTemplateErr.message }, { status: 500 });
+    return NextResponse.json(
+      { error: sourceTemplateErr.message },
+      { status: 500 }
+    );
   }
 
   const { data: sourceSteps, error: sourceErr } = await supabaseAdmin
@@ -92,55 +98,33 @@ export async function POST(req: Request) {
   }
 
   if (!sourceSteps || sourceSteps.length === 0) {
-    return NextResponse.json({ error: "Source cadence not found" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Source cadence not found" },
+      { status: 404 }
+    );
   }
 
-  const vertical = normalizeVertical(sourceTemplate?.vertical ?? sourceSteps[0]?.vertical);
+  const vertical = normalizeVertical(
+    sourceTemplate?.vertical ?? sourceSteps[0]?.vertical
+  );
 
-  const { error: templateInsertErr } = await supabaseAdmin
+  const { error: templateUpsertErr } = await supabaseAdmin
     .from("cadence_templates")
     .upsert({
-      key: new_cadence_key,
-      name: new_cadence_key,
-      is_active: true,
-      vertical,
-      updated_at: new Date().toISOString(),
-    });
-
-  if (templateInsertErr) {
-    return NextResponse.json({ error: templateInsertErr.message }, { status: 500 });
-  }
-
-  const { data: sourceTemplate, error: sourceTemplateErr } = await supabaseAdmin
-    .from("cadence_templates")
-    .select(`
-      key,
-      name,
-      vertical,
-      is_active
-    `)
-    .eq("key", source_cadence_key)
-    .maybeSingle();
-
-  if (sourceTemplateErr) {
-    return NextResponse.json({ error: sourceTemplateErr.message }, { status: 500 });
-  }
-
-  const { error: templateInsertErr } = await supabaseAdmin
-    .from("cadence_templates")
-    .insert({
       key: new_cadence_key,
       name: sourceTemplate?.name
         ? `${sourceTemplate.name} Copy`
         : new_cadence_key,
-      vertical: sourceTemplate?.vertical || "coaching",
       is_active: sourceTemplate?.is_active ?? true,
-      created_at: new Date().toISOString(),
+      vertical,
       updated_at: new Date().toISOString(),
     });
 
-  if (templateInsertErr) {
-    return NextResponse.json({ error: templateInsertErr.message }, { status: 500 });
+  if (templateUpsertErr) {
+    return NextResponse.json(
+      { error: templateUpsertErr.message },
+      { status: 500 }
+    );
   }
 
   const payload = sourceSteps.map((s: any) => ({
@@ -152,7 +136,7 @@ export async function POST(req: Request) {
     due_offset_days: s.due_offset_days,
     required_contact_status: s.required_contact_status,
     is_active: s.is_active,
-    vertical: sourceTemplate?.vertical || "coaching",
+    vertical,
   }));
 
   const { error: insertErr } = await supabaseAdmin
@@ -171,5 +155,9 @@ export async function POST(req: Request) {
     body: `Cadence ${source_cadence_key} duplicated to ${new_cadence_key}. Vertical: ${vertical}.`,
   });
 
-  return NextResponse.json({ ok: true, cadence_key: new_cadence_key, vertical });
+  return NextResponse.json({
+    ok: true,
+    cadence_key: new_cadence_key,
+    vertical,
+  });
 }
