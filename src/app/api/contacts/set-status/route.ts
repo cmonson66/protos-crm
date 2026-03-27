@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { requireUser, getRole, canEditContact } from "@/lib/apiAuth";
+import {
+  requireUser,
+  getRole,
+  canEditContact,
+  type ContactAccessRecord,
+} from "@/lib/apiAuth";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
@@ -10,8 +15,29 @@ const ALLOWED_STATUSES = new Set([
   "Closed/Do Not Contact",
 ]);
 
+type ContactStatusAccessRecord = ContactAccessRecord & {
+  id: string;
+  status: string | null;
+};
+
 export async function POST(req: Request) {
   try {
+    const auth = await requireUser(req);
+
+    if (!auth.ok) {
+      return NextResponse.json(
+        { error: auth.error },
+        { status: auth.status }
+      );
+    }
+
+    const actorUserId = auth.user.id;
+    const roleResult = await getRole(actorUserId);
+
+    if (!roleResult.is_active) {
+      return NextResponse.json({ error: "User inactive" }, { status: 403 });
+    }
+
     const body = await req.json().catch(() => ({}));
     const contact_id = String(body?.contact_id || "").trim();
     const status = String(body?.status || "").trim();
@@ -24,26 +50,19 @@ export async function POST(req: Request) {
     }
 
     if (!ALLOWED_STATUSES.has(status)) {
-      return NextResponse.json(
-        { error: "Invalid status" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Invalid status" }, { status: 400 });
     }
-
-    const user = await requireUser(req);
-    const actorUserId = user.id;
-    const role = await getRole(actorUserId);
 
     const { data: contact, error: contactErr } = await supabaseAdmin
       .from("contacts")
       .select("id, owner_user_id, assigned_to_user_id, status")
       .eq("id", contact_id)
-      .maybeSingle();
+      .maybeSingle<ContactStatusAccessRecord>();
 
     if (contactErr) {
       return NextResponse.json(
         { error: contactErr.message },
-        { status: 400 }
+        { status: 500 }
       );
     }
 
@@ -54,7 +73,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const allowed = canEditContact(role, actorUserId, contact);
+    const allowed = canEditContact(roleResult.role, actorUserId, contact);
 
     if (!allowed) {
       return NextResponse.json(
@@ -63,10 +82,11 @@ export async function POST(req: Request) {
       );
     }
 
-    const { data, error } = await supabaseAdmin.rpc("contact_set_status", {
-      p_contact_id: contact_id,
-      p_status: status,
-    });
+const { data, error } = await supabaseAdmin.rpc("contact_set_status", {
+  p_contact_id: contact_id,
+  p_status: status,
+  p_actor_user_id: actorUserId,
+});
 
     if (error) {
       return NextResponse.json(
@@ -82,13 +102,9 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true, data: data ?? null });
   } catch (e: any) {
-    const message = e?.message || "Server error";
-    const status =
-      message === "Not authenticated" || message === "Invalid session" ? 401 : 500;
-
     return NextResponse.json(
-      { error: message },
-      { status }
+      { error: e?.message || "Server error" },
+      { status: 500 }
     );
   }
 }

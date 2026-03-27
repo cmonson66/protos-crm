@@ -11,12 +11,12 @@ function toNumberOrNull(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function normalizeVertical(value: unknown): "coaching" | "corporate" {
-  return value === "corporate" ? "corporate" : "coaching";
+function normalizeVertical(value: unknown): "athletics" | "corporate" {
+  return value === "corporate" ? "corporate" : "athletics";
 }
 
 function buildNextBestAction(contact: {
-  vertical: "coaching" | "corporate";
+  vertical: "athletics" | "corporate";
   status: string;
   cadence_status: string | null;
   cadence_step: number | null;
@@ -120,15 +120,11 @@ export async function GET(
     return NextResponse.json({ error: "Contact not found" }, { status: 404 });
   }
 
-  if (
-    !isPrivileged(role) &&
-    contact.assigned_to_user_id !== me &&
-    contact.owner_user_id !== me
-  ) {
+  if (!isPrivileged(role) && contact.assigned_to_user_id !== me && contact.owner_user_id !== me) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { data: scoreRows, error: scoreErr } = await supabaseAdmin.rpc("contact_priority_scores");
+  const { data: scoreRows, error: scoreErr } = await supabaseAdmin.rpc("contact_priority_scores_v2");
   if (scoreErr) {
     return NextResponse.json({ error: scoreErr.message }, { status: 500 });
   }
@@ -147,19 +143,25 @@ export async function GET(
     updated_at: scoreRow?.updated_at ?? contact.updated_at ?? null,
     cadence_next_due_at: scoreRow?.cadence_next_due_at ?? contact.cadence_next_due_at ?? null,
     school_tier: scoreRow?.school_tier ?? null,
-    account_tier: null,
+    account_tier: scoreRow?.account_tier ?? null,
     role_seniority: scoreRow?.role_seniority ?? null,
     market_segment: scoreRow?.market_segment ?? null,
     buying_intent: scoreRow?.buying_intent ?? null,
     company_size: scoreRow?.company_size ?? null,
-    existing_score: Number(scoreRow?.score || 0),
+    open_task_count: scoreRow?.open_task_count ?? null,
+    due_task_count: scoreRow?.due_task_count ?? null,
+    overdue_task_count: scoreRow?.overdue_task_count ?? null,
+    open_cadence_task_count: scoreRow?.open_cadence_task_count ?? null,
+    radar_promotion_open_count: scoreRow?.radar_promotion_open_count ?? null,
+    touches_7d: scoreRow?.touches_7d ?? null,
+    touches_30d: scoreRow?.touches_30d ?? null,
+    completed_touches_30d: scoreRow?.completed_touches_30d ?? null,
+    snoozes_30d: scoreRow?.snoozes_30d ?? null,
   });
 
-  const priorityScore = Number(scored.priority_score || 0);
+  const priorityScore = Number(scoreRow?.priority_score ?? scored.priority_score ?? 0);
 
-  const derivedSchoolTier =
-    toNumberOrNull(scoreRow?.school_tier) ??
-    null;
+  const derivedSchoolTier = toNumberOrNull(scoreRow?.school_tier) ?? null;
 
   const schoolName =
     (typeof scoreRow?.school_name === "string" && scoreRow.school_name.trim()) || null;

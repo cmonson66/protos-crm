@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
-  canManagerModifyUser,
+  canActorManageTargetUser,
   getRole,
   isPrivileged,
   requireUser,
@@ -42,12 +42,18 @@ export async function POST(req: Request) {
   const newRole = rawRole && isRole(rawRole) ? rawRole : rawRole ? ("invalid" as Role) : null;
   const is_active_patch =
     typeof body.is_active === "boolean" ? body.is_active : null;
+  const manager_user_id_patch =
+    body.manager_user_id === null || body.manager_user_id === ""
+      ? null
+      : body.manager_user_id
+        ? String(body.manager_user_id).trim()
+        : undefined;
 
   if (!user_id) {
     return NextResponse.json({ error: "user_id required" }, { status: 400 });
   }
 
-  if (!newRole && is_active_patch === null) {
+  if (!newRole && is_active_patch === null && manager_user_id_patch === undefined) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
@@ -64,7 +70,7 @@ export async function POST(req: Request) {
 
   const { data: target, error: targetErr } = await supabaseAdmin
     .from("user_profiles")
-    .select("user_id, role, is_admin, is_active, full_name, email")
+    .select("user_id, role, is_admin, is_active, full_name, email, manager_user_id")
     .eq("user_id", user_id)
     .maybeSingle();
 
@@ -80,11 +86,29 @@ export async function POST(req: Request) {
     ? "admin"
     : ((target.role as Role) || "rep");
 
-  const allowed = canManagerModifyUser({
+  const requestedManagerUserId =
+    actorRole === "admin"
+      ? manager_user_id_patch
+      : actorRole === "manager"
+        ? manager_user_id_patch === undefined
+          ? target.manager_user_id ?? null
+          : manager_user_id_patch
+        : null;
+
+  const allowed = await canActorManageTargetUser({
+    actorUserId: me,
     actorRole,
+    targetUserId: target.user_id,
     targetRole,
     targetIsAdmin: !!target.is_admin,
+    targetManagerUserId: target.manager_user_id ?? null,
     nextRole: newRole,
+    nextManagerUserId:
+      actorRole === "manager"
+        ? requestedManagerUserId === null
+          ? me
+          : requestedManagerUserId
+        : requestedManagerUserId ?? null,
   });
 
   if (!allowed) {
@@ -92,7 +116,7 @@ export async function POST(req: Request) {
       {
         error:
           actorRole === "manager"
-            ? "Managers cannot change current admin users or promote users to admin."
+            ? "Managers can only modify users assigned to them and cannot move users outside their own scope."
             : "Forbidden",
       },
       { status: 403 }
@@ -104,10 +128,26 @@ export async function POST(req: Request) {
   if (newRole) {
     patch.role = newRole;
     patch.is_admin = newRole === "admin";
+
+    if (newRole === "admin") {
+      patch.manager_user_id = null;
+    }
   }
 
   if (is_active_patch !== null) {
     patch.is_active = is_active_patch;
+  }
+
+  if (manager_user_id_patch !== undefined) {
+    if (actorRole === "admin") {
+      patch.manager_user_id = manager_user_id_patch;
+    } else if (actorRole === "manager") {
+      patch.manager_user_id = me;
+    }
+  }
+
+  if (actorRole === "manager" && targetRole !== "admin") {
+    patch.manager_user_id = me;
   }
 
   const hasChanges = Object.keys(patch).length > 0;
@@ -129,7 +169,19 @@ export async function POST(req: Request) {
     changes.push(`role changed from ${targetRole} to ${newRole}`);
   }
   if (is_active_patch !== null && is_active_patch !== target.is_active) {
-    changes.push(`active changed from ${target.is_active ? "true" : "false"} to ${is_active_patch ? "true" : "false"}`);
+    changes.push(
+      `active changed from ${target.is_active ? "true" : "false"} to ${is_active_patch ? "true" : "false"}`
+    );
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(patch, "manager_user_id") &&
+    patch.manager_user_id !== (target.manager_user_id ?? null)
+  ) {
+    changes.push(
+      `manager changed from ${target.manager_user_id ?? "unassigned"} to ${String(
+        patch.manager_user_id ?? "unassigned"
+      )}`
+    );
   }
 
   await supabaseAdmin.from("activities").insert({

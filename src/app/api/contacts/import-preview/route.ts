@@ -41,8 +41,8 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => ({}));
   const csv_text = String(body?.csv_text || "");
-  const vertical =
-    body?.vertical === "corporate" ? "corporate" : "coaching";
+  const vertical: ContactImportVertical =
+    body?.vertical === "corporate" ? "corporate" : "athletics";
   const status = clean(body?.status || "New");
   const cadence_key = clean(body?.cadence_key || "");
   const auto_create_organizations = Boolean(body?.auto_create_organizations);
@@ -99,7 +99,7 @@ export async function POST(req: Request) {
 
   const normalized = parsedRows.map((row) => ({
     row_number: row.row_number,
-    ...normalizeImportRow(row.values, vertical as ContactImportVertical),
+    ...normalizeImportRow(row.values, vertical),
   }));
 
   const emails = Array.from(
@@ -114,13 +114,13 @@ export async function POST(req: Request) {
   const orgNames = Array.from(
     new Set(
       normalized
-        .map((r) => (vertical === "coaching" ? r.school_name : r.account_name))
+        .map((r) => (vertical === "athletics" ? r.school_name : r.account_name))
         .filter(Boolean)
         .map((x) => normalizeName(x))
     )
   );
 
-  let existingContactsByEmail = new Map<string, { id: string; name: string }>();
+  const existingContactsByEmail = new Map<string, { id: string; name: string }>();
   if (emails.length > 0) {
     const { data: existingContacts, error: contactsErr } = await supabaseAdmin
       .from("contacts")
@@ -134,14 +134,15 @@ export async function POST(req: Request) {
     for (const row of existingContacts ?? []) {
       existingContactsByEmail.set(String(row.primary_email || "").toLowerCase(), {
         id: String(row.id),
-        name: `${row.first_name || ""} ${row.last_name || ""}`.trim() || "(No name)",
+        name:
+          `${row.first_name || ""} ${row.last_name || ""}`.trim() || "(No name)",
       });
     }
   }
 
   let existingOrganizations = new Set<string>();
   if (orgNames.length > 0) {
-    if (vertical === "coaching") {
+    if (vertical === "athletics") {
       const { data: schools, error: schoolsErr } = await supabaseAdmin
         .from("schools")
         .select("id, name");
@@ -183,17 +184,18 @@ export async function POST(req: Request) {
       errors.push("At least one of first_name, last_name, or primary_email is required");
     }
 
-    if (!row.sport) {
-      errors.push("sport is required");
-    }
-
-    const orgName =
-      vertical === "coaching" ? row.school_name : row.account_name;
+    const orgName = vertical === "athletics" ? row.school_name : row.account_name;
 
     if (!orgName) {
       errors.push(
-        vertical === "coaching" ? "school_name is required" : "account_name is required"
+        vertical === "athletics"
+          ? "school_name is required"
+          : "account_name is required"
       );
+    }
+
+    if (vertical === "athletics" && !row.sport) {
+      errors.push("sport is required for athletics imports");
     }
 
     if (row.primary_email && existingContactsByEmail.has(row.primary_email.toLowerCase())) {
@@ -211,22 +213,48 @@ export async function POST(req: Request) {
     if (orgName && !existingOrganizations.has(normalizeName(orgName))) {
       if (auto_create_organizations) {
         warnings.push(
-          vertical === "coaching"
+          vertical === "athletics"
             ? "School will be auto-created"
             : "Account will be auto-created"
         );
       } else {
-        errors.push(
-          vertical === "coaching"
-            ? "School not found"
-            : "Account not found"
-        );
+        errors.push(vertical === "athletics" ? "School not found" : "Account not found");
       }
     }
 
     return {
       row_number: row.row_number,
-      ...row,
+      first_name: row.first_name || "",
+      last_name: row.last_name || "",
+      primary_email: row.primary_email || "",
+      phone: row.phone || "",
+      linkedin_url: row.linkedin_url || "",
+      address: clean(row.address),
+      city: clean(row.city),
+      state: clean(row.state),
+      zip: clean(row.zip),
+      website: clean(row.website),
+      job_title_raw: row.job_title_raw || "",
+      job_function: row.job_function || "",
+      management_level: row.management_level || "",
+      sport: row.sport || "",
+      division: row.division || "",
+      conference: row.conference || "",
+      region: row.region || "",
+      rep_notes: row.rep_notes || "",
+      school_name: row.school_name || "",
+      account_name: row.account_name || "",
+      account_website: row.account_website || "",
+      account_employee_count: row.account_employee_count || "",
+      account_industry: row.account_industry || "",
+      account_address: row.account_address || "",
+      account_city: row.account_city || "",
+      account_state: row.account_state || "",
+      status: row.status || status,
+      cadence_status: row.cadence_status || "",
+      assigned_to_user_id: row.assigned_to_user_id || assigned_to_user_id || "",
+      source: row.source || "",
+      import_batch: row.import_batch || "",
       ready: errors.length === 0,
       errors,
       warnings,

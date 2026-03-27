@@ -10,7 +10,7 @@ import {
 
 export const runtime = "nodejs";
 
-type ContactVertical = "coaching" | "corporate";
+type ContactVertical = "athletics" | "corporate";
 type BuyingCommitteeRole =
   | "economic_buyer"
   | "technical_buyer"
@@ -28,7 +28,7 @@ function maybeNull(value: unknown) {
 }
 
 function isValidVertical(value: string): value is ContactVertical {
-  return value === "coaching" || value === "corporate";
+  return value === "athletics" || value === "corporate";
 }
 
 function isValidCommitteeRole(value: string): value is BuyingCommitteeRole {
@@ -106,7 +106,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const verticalRaw = clean(body.vertical || contact.vertical || "coaching").toLowerCase();
+  const verticalRaw = clean(body.vertical || contact.vertical || "athletics").toLowerCase();
   if (!isValidVertical(verticalRaw)) {
     return NextResponse.json({ error: "Invalid vertical" }, { status: 400 });
   }
@@ -117,6 +117,12 @@ export async function POST(req: Request) {
   const primary_email = maybeNull(body.primary_email)?.toLowerCase() ?? null;
   const job_title_raw = maybeNull(body.job_title_raw);
   const phone = maybeNull(body.phone);
+  const address = maybeNull(body.address);
+  const city = maybeNull(body.city);
+  const state = maybeNull(body.state);
+  const zip = maybeNull(body.zip);
+  const website = maybeNull(body.website);
+  const linkedin_url = maybeNull(body.linkedin_url);
   const sport = clean(body.sport);
   const division = maybeNull(body.division);
   const conference = maybeNull(body.conference);
@@ -151,7 +157,7 @@ export async function POST(req: Request) {
   let school_id: string | null = null;
   let account_id: string | null = null;
 
-  if (vertical === "coaching") {
+  if (vertical === "athletics") {
     school_id = school_id_input;
     account_id = null;
     buying_committee_role_override = null;
@@ -160,7 +166,7 @@ export async function POST(req: Request) {
     account_id = account_id_input;
   }
 
-  if (vertical === "coaching" && school_id) {
+  if (vertical === "athletics" && school_id) {
     const { data: school, error: schoolErr } = await supabaseAdmin
       .from("schools")
       .select("id")
@@ -172,10 +178,7 @@ export async function POST(req: Request) {
     }
 
     if (!school) {
-      return NextResponse.json(
-        { error: "Selected school not found." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Selected school not found." }, { status: 400 });
     }
   }
 
@@ -191,10 +194,7 @@ export async function POST(req: Request) {
     }
 
     if (!account) {
-      return NextResponse.json(
-        { error: "Selected account not found." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Selected account not found." }, { status: 400 });
     }
   }
 
@@ -230,6 +230,12 @@ export async function POST(req: Request) {
     primary_email,
     job_title_raw,
     phone,
+    address,
+    city,
+    state,
+    zip,
+    website,
+    linkedin_url,
     sport,
     division,
     conference,
@@ -256,13 +262,11 @@ export async function POST(req: Request) {
   }
 
   if (body && typeof body.profile === "object" && body.profile !== null) {
-    const { error: profileErr } = await supabaseAdmin
-      .from("contact_profiles")
-      .upsert({
-        contact_id,
-        profile: body.profile,
-        updated_at: nowIso,
-      });
+    const { error: profileErr } = await supabaseAdmin.from("contact_profiles").upsert({
+      contact_id,
+      profile: body.profile,
+      updated_at: nowIso,
+    });
 
     if (profileErr) {
       return NextResponse.json({ error: profileErr.message }, { status: 500 });
@@ -298,8 +302,12 @@ export async function POST(req: Request) {
       vertical === "corporate"
         ? `Contact details were updated. Vertical is ${vertical}. Buying committee override is ${
             buying_committee_role_override ?? "inferred"
-          }.${status && status !== (contact.status ?? null) ? ` Status changed to ${status}.` : ""}`
-        : `Contact details were updated. Vertical is ${vertical}.${status && status !== (contact.status ?? null) ? ` Status changed to ${status}.` : ""}`,
+          }.${linkedin_url ? " LinkedIn URL present." : " LinkedIn URL not set."}${
+            status && status !== (contact.status ?? null) ? ` Status changed to ${status}.` : ""
+          }`
+        : `Contact details were updated. Vertical is ${vertical}.${linkedin_url ? " LinkedIn URL present." : " LinkedIn URL not set."}${
+            status && status !== (contact.status ?? null) ? ` Status changed to ${status}.` : ""
+          }`,
   });
 
   return NextResponse.json({ ok: true });

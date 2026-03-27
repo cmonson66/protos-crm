@@ -9,7 +9,7 @@ import {
 
 export const runtime = "nodejs";
 
-type ContactVertical = "coaching" | "corporate";
+type ContactVertical = "athletics" | "corporate";
 
 function clean(value: unknown) {
   return String(value ?? "").trim();
@@ -21,7 +21,7 @@ function maybeNull(value: unknown) {
 }
 
 function isValidVertical(value: string): value is ContactVertical {
-  return value === "coaching" || value === "corporate";
+  return value === "athletics" || value === "corporate";
 }
 
 export async function POST(req: Request) {
@@ -43,16 +43,22 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => ({}));
 
-  const verticalRaw = clean(body.vertical || "coaching").toLowerCase();
+  const verticalRaw = clean(body.vertical || "athletics").toLowerCase();
   const vertical: ContactVertical = isValidVertical(verticalRaw)
     ? verticalRaw
-    : "coaching";
+    : "athletics";
 
   const first_name = maybeNull(body.first_name);
   const last_name = maybeNull(body.last_name);
   const primary_email = maybeNull(body.primary_email)?.toLowerCase() ?? null;
   const job_title_raw = maybeNull(body.job_title_raw);
   const phone = maybeNull(body.phone);
+  const address = maybeNull(body.address);
+  const city = maybeNull(body.city);
+  const state = maybeNull(body.state);
+  const zip = maybeNull(body.zip);
+  const website = maybeNull(body.website);
+  const linkedin_url = maybeNull(body.linkedin_url);
   const sport = clean(body.sport);
   const division = maybeNull(body.division);
   const conference = maybeNull(body.conference);
@@ -65,8 +71,7 @@ export async function POST(req: Request) {
   const account_id_input = maybeNull(body.account_id);
 
   const assignedInput = maybeNull(body.assigned_to_user_id);
-  const activeInput =
-    typeof body.active === "boolean" ? Boolean(body.active) : true;
+  const activeInput = typeof body.active === "boolean" ? Boolean(body.active) : true;
 
   if (!first_name && !last_name && !primary_email) {
     return NextResponse.json(
@@ -90,7 +95,7 @@ export async function POST(req: Request) {
   let school_id: string | null = null;
   let account_id: string | null = null;
 
-  if (vertical === "coaching") {
+  if (vertical === "athletics") {
     school_id = school_id_input;
     account_id = null;
   } else {
@@ -98,7 +103,7 @@ export async function POST(req: Request) {
     account_id = account_id_input;
   }
 
-  if (vertical === "coaching" && school_id) {
+  if (vertical === "athletics" && school_id) {
     const { data: school, error: schoolErr } = await supabaseAdmin
       .from("schools")
       .select("id")
@@ -110,10 +115,7 @@ export async function POST(req: Request) {
     }
 
     if (!school) {
-      return NextResponse.json(
-        { error: "Selected school not found." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Selected school not found." }, { status: 400 });
     }
   }
 
@@ -129,10 +131,7 @@ export async function POST(req: Request) {
     }
 
     if (!account) {
-      return NextResponse.json(
-        { error: "Selected account not found." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Selected account not found." }, { status: 400 });
     }
   }
 
@@ -150,32 +149,43 @@ export async function POST(req: Request) {
 
     if (existing) {
       return NextResponse.json(
-        { error: "A contact with that email already exists." },
+        {
+          error: "A contact with that email already exists.",
+          code: "duplicate_contact",
+          existing_contact: {
+            id: existing.id,
+            email: existing.primary_email ?? null,
+          },
+        },
         { status: 409 }
       );
     }
   }
 
   let cadence_key: string | null = null;
+
   if (cadence_key_input) {
-    const { data: cadenceTemplate, error: cadenceErr } = await supabaseAdmin
-      .from("cadence_templates")
-      .select("key, vertical, is_active")
-      .eq("key", cadence_key_input)
-      .eq("is_active", true)
+    const { data: activeSequence, error: cadenceErr } = await supabaseAdmin
+      .from("v_active_prospecting_sequences")
+      .select(`
+        cadence_key,
+        vertical,
+        audience_stage,
+        sequence_status
+      `)
+      .eq("cadence_key", cadence_key_input)
+      .eq("vertical", vertical)
+      .eq("audience_stage", "new")
+      .eq("sequence_status", "active")
       .maybeSingle();
 
     if (cadenceErr) {
       return NextResponse.json({ error: cadenceErr.message }, { status: 500 });
     }
 
-    if (!cadenceTemplate) {
-      return NextResponse.json({ error: "Selected cadence not found." }, { status: 400 });
-    }
-
-    if (cadenceTemplate.vertical !== vertical) {
+    if (!activeSequence) {
       return NextResponse.json(
-        { error: `Cadence ${cadence_key_input} does not match ${vertical} contact vertical.` },
+        { error: "Selected cadence not found in active communication sequences." },
         { status: 400 }
       );
     }
@@ -205,6 +215,12 @@ export async function POST(req: Request) {
     primary_email,
     job_title_raw,
     phone,
+    address,
+    city,
+    state,
+    zip,
+    website,
+    linkedin_url,
     sport,
     division,
     conference,
@@ -216,7 +232,7 @@ export async function POST(req: Request) {
     rep_notes,
     cadence_key,
     cadence_step: 0,
-    cadence_status: "inactive",
+    cadence_status: cadence_key ? "stopped" : "inactive",
     cadence_next_due_at: null,
     cadence_started_at: null,
     cadence_updated_at: cadence_key ? nowIso : null,
@@ -236,9 +252,7 @@ export async function POST(req: Request) {
   }
 
   const profilePayload =
-    body && typeof body.profile === "object" && body.profile !== null
-      ? body.profile
-      : {};
+    body && typeof body.profile === "object" && body.profile !== null ? body.profile : {};
 
   await supabaseAdmin.from("contact_profiles").upsert({
     contact_id: data.id,
@@ -255,11 +269,11 @@ export async function POST(req: Request) {
     body:
       vertical === "corporate"
         ? cadence_key
-          ? `Corporate contact added manually through CRM with cadence ${cadence_key} assigned.`
-          : "Corporate contact added manually through CRM."
+          ? `Corporate contact added manually through CRM with cadence ${cadence_key} assigned.${linkedin_url ? " LinkedIn URL present." : ""}`
+          : `Corporate contact added manually through CRM.${linkedin_url ? " LinkedIn URL present." : ""}`
         : cadence_key
-          ? `Coaching contact added manually through CRM with cadence ${cadence_key} assigned.`
-          : "Coaching contact added manually through CRM.",
+          ? `Athletics contact added manually through CRM with cadence ${cadence_key} assigned.${linkedin_url ? " LinkedIn URL present." : ""}`
+          : `Athletics contact added manually through CRM.${linkedin_url ? " LinkedIn URL present." : ""}`,
   });
 
   return NextResponse.json({ ok: true, contact_id: data.id });

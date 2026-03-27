@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getManagerScopeUserIds } from "@/lib/apiAuth";
 
 export const runtime = "nodejs";
 
@@ -109,10 +110,14 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "User inactive" }, { status: 403 });
     }
 
-    const isManager =
-      !!meProfile?.is_admin ||
-      meProfile?.role === "admin" ||
-      meProfile?.role === "manager";
+    const role =
+      !!meProfile?.is_admin || meProfile?.role === "admin"
+        ? "admin"
+        : meProfile?.role === "manager"
+          ? "manager"
+          : "rep";
+
+    const scopeUserIds = await getManagerScopeUserIds(userId, role);
 
     const now = new Date();
     const since30 = new Date(now);
@@ -137,9 +142,12 @@ export async function GET(req: Request) {
       .select("id, duration_seconds, outcome, occurred_at, user_id, subject")
       .gte("occurred_at", startIso30);
 
-    if (!isManager) {
+    if (role === "rep") {
       tasksQuery = tasksQuery.eq("assigned_to_user_id", userId);
       activitiesQuery = activitiesQuery.eq("user_id", userId);
+    } else if (role === "manager") {
+      tasksQuery = tasksQuery.in("assigned_to_user_id", scopeUserIds);
+      activitiesQuery = activitiesQuery.in("user_id", scopeUserIds);
     }
 
     const { data: completedTasks, error: completedErr } = await tasksQuery;
@@ -261,7 +269,7 @@ export async function GET(req: Request) {
       skip_count: number;
     }[] = [];
 
-    if (isManager) {
+    if (role === "admin" || role === "manager") {
       const repMap = new Map<
         string,
         {
@@ -390,7 +398,7 @@ export async function GET(req: Request) {
       snooze_rate: snoozeRate,
       skip_rate: skipRate,
       tasks_per_hour: tasksPerHour,
-      manager_mode: isManager,
+      manager_mode: role === "admin" || role === "manager",
       leaderboard,
       sources,
     });

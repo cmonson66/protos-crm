@@ -34,6 +34,13 @@ type HealthData = {
   }>;
 };
 
+function tierTone(tier: number | null) {
+  if (tier === 1) return "border-violet-200 bg-violet-50 text-violet-700";
+  if (tier === 2) return "border-sky-200 bg-sky-50 text-sky-700";
+  if (tier === 3) return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  return "border-slate-200 bg-slate-50 text-slate-700";
+}
+
 export default function AdminSchoolsPage() {
   const [loading, setLoading] = useState(true);
   const [busyGroupKey, setBusyGroupKey] = useState<string | null>(null);
@@ -142,113 +149,165 @@ export default function AdminSchoolsPage() {
   }, [groups]);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 p-6">
       {toast ? (
-        <div className="fixed right-6 top-6 z-50 rounded-2xl border bg-white px-4 py-3 shadow">
-          <div className="text-sm font-semibold">{toast}</div>
+        <div className="fixed right-6 top-6 z-50 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-lg">
+          <div className="text-sm font-semibold text-slate-900">{toast}</div>
         </div>
       ) : null}
 
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <div className="text-3xl font-semibold">School Health Dashboard</div>
-          <div className="mt-1 text-sm text-muted-foreground">
-            Monitor school data quality, spot duplicate records, and merge them safely.
+      <div className="crm-card overflow-hidden p-0">
+        <div className="border-b border-white/70 bg-gradient-to-r from-white/95 via-white/85 to-orange-50/80 px-6 py-6">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0">
+              <div className="text-4xl font-semibold tracking-tight text-slate-900">
+                School Health Dashboard
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700">
+                  Duplicate Cleanup
+                </span>
+
+                <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700">
+                  Canonical Merge Control
+                </span>
+
+                <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700">
+                  {loading ? "Loading..." : `${groups.length} duplicate group${groups.length === 1 ? "" : "s"}`}
+                </span>
+              </div>
+
+              <div className="mt-4 text-sm text-slate-600">
+                Monitor school data quality, spot duplicate records, and merge
+                them safely.
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button className="crm-button px-4 py-2" onClick={() => void loadAll()}>
+                Refresh
+              </button>
+            </div>
           </div>
         </div>
 
-        <button
-          className="rounded-xl border px-4 py-2"
-          onClick={() => void loadAll()}
-        >
-          Refresh
-        </button>
+        <div className="grid gap-4 border-t border-white/60 bg-white/40 px-6 py-5 md:grid-cols-2 xl:grid-cols-5">
+          <div className="crm-card-soft p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Total Schools
+            </div>
+            <div className="mt-2 text-3xl font-semibold text-slate-900">
+              {health?.total_schools ?? 0}
+            </div>
+          </div>
+
+          <div className="crm-card-soft p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Duplicate Groups
+            </div>
+            <div className="mt-2 text-3xl font-semibold text-slate-900">
+              {health?.duplicate_groups ?? 0}
+            </div>
+          </div>
+
+          <div className="crm-card-soft p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              No Contacts
+            </div>
+            <div className="mt-2 text-3xl font-semibold text-slate-900">
+              {health?.schools_with_no_contacts ?? 0}
+            </div>
+          </div>
+
+          <div className="crm-card-soft p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              10+ Contacts
+            </div>
+            <div className="mt-2 text-3xl font-semibold text-slate-900">
+              {health?.schools_with_10_plus_contacts ?? 0}
+            </div>
+          </div>
+
+          <div className="crm-card-soft p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              50+ Contacts
+            </div>
+            <div className="mt-2 text-3xl font-semibold text-slate-900">
+              {health?.schools_with_50_plus_contacts ?? 0}
+            </div>
+          </div>
+        </div>
       </div>
 
       {err ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
+        <div className="crm-card border-red-200 bg-red-50 p-4 text-red-700">
           {err}
         </div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <div className="rounded-2xl border p-5">
-          <div className="text-xs text-muted-foreground">Total Schools</div>
-          <div className="mt-2 text-3xl font-semibold">
-            {health?.total_schools ?? 0}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border p-5">
-          <div className="text-xs text-muted-foreground">Duplicate Groups</div>
-          <div className="mt-2 text-3xl font-semibold">
-            {health?.duplicate_groups ?? 0}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border p-5">
-          <div className="text-xs text-muted-foreground">Schools With No Contacts</div>
-          <div className="mt-2 text-3xl font-semibold">
-            {health?.schools_with_no_contacts ?? 0}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border p-5">
-          <div className="text-xs text-muted-foreground">Schools With 10+ Contacts</div>
-          <div className="mt-2 text-3xl font-semibold">
-            {health?.schools_with_10_plus_contacts ?? 0}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border p-5">
-          <div className="text-xs text-muted-foreground">Schools With 50+ Contacts</div>
-          <div className="mt-2 text-3xl font-semibold">
-            {health?.schools_with_50_plus_contacts ?? 0}
-          </div>
-        </div>
-      </div>
-
       <div className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
-        <div className="rounded-2xl border p-5">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-lg font-semibold">Duplicate Cleanup Console</div>
-            <div className="text-sm text-muted-foreground">
-              {groups.length} duplicate group(s) • {totalDuplicateSchools} school record(s)
+        <div className="crm-card p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-lg font-semibold text-slate-900">
+                Duplicate Cleanup Console
+              </div>
+              <div className="mt-1 text-sm text-slate-600">
+                Resolve duplicate school records by selecting one canonical target.
+              </div>
+            </div>
+
+            <div className="text-sm text-slate-500">
+              {groups.length} duplicate group{groups.length === 1 ? "" : "s"} •{" "}
+              {totalDuplicateSchools} school record{totalDuplicateSchools === 1 ? "" : "s"}
             </div>
           </div>
 
           {loading ? (
-            <div className="mt-4 text-muted-foreground">Loading duplicate schools...</div>
+            <div className="mt-4 text-sm text-slate-500">
+              Loading duplicate schools...
+            </div>
           ) : groups.length === 0 ? (
-            <div className="mt-4 rounded-xl border p-4 text-muted-foreground">
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
               No duplicate school groups found.
             </div>
           ) : (
-            <div className="mt-4 space-y-6">
+            <div className="mt-5 space-y-6">
               {groups.map((group) => {
-                const selectedTarget = targetByGroup[group.normalized_name] || group.target_school_id;
+                const selectedTarget =
+                  targetByGroup[group.normalized_name] || group.target_school_id;
+
                 const selectedTargetRow =
                   group.schools.find((s) => s.id === selectedTarget) ?? group.schools[0];
 
                 const sources = group.schools.filter((s) => s.id !== selectedTarget);
 
                 return (
-                  <div key={group.normalized_name} className="rounded-2xl border p-4 space-y-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="text-base font-semibold">
-                          {selectedTargetRow?.name || group.target_school_name}
+                  <div key={group.normalized_name} className="crm-card-soft p-4">
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-base font-semibold text-slate-900">
+                            {selectedTargetRow?.name || group.target_school_name}
+                          </div>
+
+                          <span className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+                            {group.schools.length} records
+                          </span>
+
+                          <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
+                            {group.total_contacts} linked contacts
+                          </span>
                         </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
+
+                        <div className="mt-2 text-xs text-slate-500">
                           Normalized key: {group.normalized_name}
-                        </div>
-                        <div className="mt-1 text-sm text-muted-foreground">
-                          {group.schools.length} school records • {group.total_contacts} linked contacts
                         </div>
                       </div>
 
                       <button
-                        className="rounded-xl border px-4 py-2 disabled:opacity-50"
+                        className="crm-button px-4 py-2 disabled:opacity-50"
                         disabled={busyGroupKey === group.normalized_name || sources.length === 0}
                         onClick={() => void mergeGroup(group)}
                       >
@@ -256,10 +315,13 @@ export default function AdminSchoolsPage() {
                       </button>
                     </div>
 
-                    <div className="space-y-2">
-                      <div className="text-sm font-medium">Choose canonical target school</div>
+                    <div className="mt-4 space-y-2">
+                      <div className="text-sm font-medium text-slate-700">
+                        Choose canonical target school
+                      </div>
+
                       <select
-                        className="w-full rounded-xl border px-3 py-2"
+                        className="crm-input w-full px-3 py-2"
                         value={selectedTarget}
                         onChange={(e) =>
                           setTargetByGroup((prev) => ({
@@ -277,7 +339,7 @@ export default function AdminSchoolsPage() {
                       </select>
                     </div>
 
-                    <div className="grid gap-3 md:grid-cols-2">
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
                       {group.schools.map((school) => {
                         const isTarget = school.id === selectedTarget;
 
@@ -285,19 +347,40 @@ export default function AdminSchoolsPage() {
                           <div
                             key={school.id}
                             className={`rounded-xl border p-4 ${
-                              isTarget ? "border-emerald-300 bg-emerald-50" : ""
+                              isTarget
+                                ? "border-emerald-300 bg-emerald-50"
+                                : "border-slate-200 bg-white"
                             }`}
                           >
                             <div className="flex items-center justify-between gap-3">
-                              <div className="font-medium">{school.name}</div>
-                              <div className="text-xs font-semibold">
+                              <div className="font-medium text-slate-900">{school.name}</div>
+
+                              <div
+                                className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                                  isTarget
+                                    ? "border-emerald-300 bg-white text-emerald-700"
+                                    : "border-slate-200 bg-slate-50 text-slate-600"
+                                }`}
+                              >
                                 {isTarget ? "TARGET" : "SOURCE"}
                               </div>
                             </div>
 
-                            <div className="mt-3 space-y-1 text-sm text-muted-foreground">
-                              <div>Contacts: {school.contact_count}</div>
-                              <div>Tier: {school.tier ?? "—"}</div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <span
+                                className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tierTone(
+                                  school.tier
+                                )}`}
+                              >
+                                Tier {school.tier ?? "—"}
+                              </span>
+
+                              <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                                {school.contact_count} contact{school.contact_count === 1 ? "" : "s"}
+                              </span>
+                            </div>
+
+                            <div className="mt-3 space-y-1 text-sm text-slate-500">
                               <div className="break-all">ID: {school.id}</div>
                             </div>
                           </div>
@@ -311,44 +394,67 @@ export default function AdminSchoolsPage() {
           )}
         </div>
 
-        <div className="rounded-2xl border p-5">
-          <div className="text-lg font-semibold">Top Schools By Contacts</div>
+        <div className="space-y-6">
+          <div className="crm-card p-6">
+            <div className="text-lg font-semibold text-slate-900">
+              Top Schools By Contacts
+            </div>
 
-          {loading ? (
-            <div className="mt-4 text-muted-foreground">Loading school health...</div>
-          ) : !health?.top_schools?.length ? (
-            <div className="mt-4 text-muted-foreground">No schools found.</div>
-          ) : (
-            <div className="mt-4 space-y-3">
-              {health.top_schools.map((school, idx) => (
-                <div key={school.id} className="rounded-xl border p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="font-medium">
-                        {idx + 1}. {school.name}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {school.tier ? `Tier ${school.tier}` : "No tier"}
-                      </div>
-                    </div>
+            {loading ? (
+              <div className="mt-4 text-sm text-slate-500">Loading school health...</div>
+            ) : !health?.top_schools?.length ? (
+              <div className="mt-4 text-sm text-slate-500">No schools found.</div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {health.top_schools.map((school, idx) => (
+                  <div key={school.id} className="crm-card-soft p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-medium text-slate-900">
+                          {idx + 1}. {school.name}
+                        </div>
 
-                    <div className="rounded-full border px-3 py-1 text-sm font-semibold">
-                      {school.contact_count}
+                        <div className="mt-2">
+                          <span
+                            className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tierTone(
+                              school.tier
+                            )}`}
+                          >
+                            Tier {school.tier ?? "—"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-sm font-semibold text-slate-900">
+                        {school.contact_count}
+                      </div>
                     </div>
                   </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="crm-card p-6">
+            <div className="text-lg font-semibold text-slate-900">
+              What this page is for
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {[
+                "Find school duplicates caused by casing, punctuation, and spacing differences",
+                "Choose the best canonical school record",
+                "Reassign all linked contacts safely before deleting duplicate school rows",
+                "Keep your contact-level reporting and school-level analytics clean",
+              ].map((item) => (
+                <div
+                  key={item}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600"
+                >
+                  {item}
                 </div>
               ))}
             </div>
-          )}
-
-          <div className="mt-6 rounded-xl border bg-slate-50 p-4">
-            <div className="text-sm font-semibold">What this page is for</div>
-            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-              <li>Find school duplicates caused by casing, punctuation, and spacing differences</li>
-              <li>Choose the best canonical school record</li>
-              <li>Reassign all linked contacts safely before deleting duplicate school rows</li>
-              <li>Keep your contact-level reporting and school-level analytics clean</li>
-            </ul>
           </div>
         </div>
       </div>

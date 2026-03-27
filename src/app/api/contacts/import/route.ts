@@ -18,10 +18,6 @@ function clean(value: unknown) {
   return String(value ?? "").trim();
 }
 
-function normalizeName(value: unknown) {
-  return clean(value).toLowerCase().replace(/\s+/g, " ");
-}
-
 function addDays(d: Date, days: number) {
   const x = new Date(d);
   x.setDate(x.getDate() + days);
@@ -87,8 +83,8 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => ({}));
   const csv_text = String(body?.csv_text || "");
-  const vertical =
-    body?.vertical === "corporate" ? "corporate" : "coaching";
+  const vertical: ContactImportVertical =
+    body?.vertical === "corporate" ? "corporate" : "athletics";
   const status = clean(body?.status || "New");
   const cadence_key = clean(body?.cadence_key || "");
   const auto_create_organizations = Boolean(body?.auto_create_organizations);
@@ -157,7 +153,7 @@ export async function POST(req: Request) {
 
   const normalizedRows = parsedRows.map((row) => ({
     row_number: row.row_number,
-    ...normalizeImportRow(row.values, vertical as ContactImportVertical),
+    ...normalizeImportRow(row.values, vertical),
   }));
 
   const results: Array<{
@@ -180,26 +176,25 @@ export async function POST(req: Request) {
         continue;
       }
 
-      if (!row.sport) {
-        results.push({
-          row_number: row.row_number,
-          ok: false,
-          message: "sport is required",
-        });
-        continue;
-      }
-
-      const orgName =
-        vertical === "coaching" ? row.school_name : row.account_name;
+      const orgName = vertical === "athletics" ? row.school_name : row.account_name;
 
       if (!orgName) {
         results.push({
           row_number: row.row_number,
           ok: false,
           message:
-            vertical === "coaching"
+            vertical === "athletics"
               ? "school_name is required"
               : "account_name is required",
+        });
+        continue;
+      }
+
+      if (vertical === "athletics" && !row.sport) {
+        results.push({
+          row_number: row.row_number,
+          ok: false,
+          message: "sport is required for athletics imports",
         });
         continue;
       }
@@ -240,7 +235,7 @@ export async function POST(req: Request) {
       let school_id: string | null = null;
       let account_id: string | null = null;
 
-      if (vertical === "coaching") {
+      if (vertical === "athletics") {
         const { data: schools, error: schoolErr } = await supabaseAdmin
           .from("schools")
           .select("id, name")
@@ -294,9 +289,11 @@ export async function POST(req: Request) {
       let cadence_started_at: string | null = null;
       let cadence_updated_at: string | null = null;
 
+      const effectiveStatus = clean(row.status || status || "New");
+
       if (
         step1 &&
-        status === "New" &&
+        effectiveStatus === "New" &&
         String(step1.required_contact_status || "New") === "New"
       ) {
         cadence_step = 1;
@@ -309,6 +306,9 @@ export async function POST(req: Request) {
         ).toISOString();
       }
 
+      const effectiveAssignedTo =
+        clean(row.assigned_to_user_id || "") || assigned_to_user_id || null;
+
       const insertRow = {
         vertical,
         school_id,
@@ -317,14 +317,20 @@ export async function POST(req: Request) {
         last_name: row.last_name || null,
         primary_email: row.primary_email || null,
         phone: row.phone || null,
+        address: clean(row.address) || null,
+        city: clean(row.city) || null,
+        state: clean(row.state) || null,
+        zip: clean(row.zip) || null,
+        website: clean(row.website) || null,
+        linkedin_url: clean(row.linkedin_url) || null,
         job_title_raw: row.job_title_raw || null,
-        sport: row.sport,
+        sport: vertical === "athletics" ? row.sport || null : null,
         division: row.division || null,
         conference: row.conference || null,
         region: row.region || null,
         owner_user_id: me,
-        assigned_to_user_id: assigned_to_user_id || null,
-        status,
+        assigned_to_user_id: effectiveAssignedTo,
+        status: effectiveStatus,
         active: true,
         rep_notes: row.rep_notes || null,
         cadence_key: cadence_step > 0 ? cadence_key : null,
@@ -350,7 +356,18 @@ export async function POST(req: Request) {
 
       await supabaseAdmin.from("contact_profiles").upsert({
         contact_id,
-        profile: {},
+        profile: {
+          job_function: row.job_function || null,
+          management_level: row.management_level || null,
+          source: row.source || null,
+          import_batch: row.import_batch || null,
+          account_website: row.account_website || null,
+          account_employee_count: row.account_employee_count || null,
+          account_industry: row.account_industry || null,
+          account_address: row.account_address || null,
+          account_city: row.account_city || null,
+          account_state: row.account_state || null,
+        },
         updated_at: nowIso,
       });
 
@@ -363,13 +380,13 @@ export async function POST(req: Request) {
         body:
           vertical === "corporate"
             ? "Corporate contact imported via CSV."
-            : "Coaching contact imported via CSV.",
+            : "Athletics contact imported via CSV.",
       });
 
       if (step1 && cadence_step === 1 && cadence_next_due_at) {
         await supabaseAdmin.from("tasks").insert({
           contact_id,
-          assigned_to_user_id: assigned_to_user_id || me,
+          assigned_to_user_id: effectiveAssignedTo || me,
           owner_user_id: me,
           task_type: "email",
           due_at: cadence_next_due_at,

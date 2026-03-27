@@ -16,16 +16,16 @@ type PriorityRow = {
   assigned_to_user_id: string | null;
   last_activity_at: string | null;
   updated_at: string | null;
-  score?: number | null;
-  priority_score?: number | null;
   school_name?: string | null;
   school_tier?: number | null;
+  priority_score?: number | null;
 };
 
 type TaskRow = {
   id: string;
   contact_id: string;
   title: string | null;
+  notes: string | null;
   task_type: string;
   due_at: string;
   status: string | null;
@@ -52,12 +52,25 @@ function classifyUrgency(dueAt: string | null) {
   return "upcoming";
 }
 
+function isRadarPromotion(task: { title?: string | null; notes?: string | null }) {
+  const title = String(task.title || "").toLowerCase();
+  const notes = String(task.notes || "").toLowerCase();
+
+  return (
+    title.startsWith("work now:") ||
+    notes.includes("queue_source=radar_promotion") ||
+    notes.includes("promoted from priority radar")
+  );
+}
+
 function queueRank(args: {
   priorityScore: number;
   dueAt: string | null;
   kind: string;
   cadenceStep: number | null;
   cadenceStatus: string | null;
+  title?: string | null;
+  notes?: string | null;
 }) {
   const urgency = classifyUrgency(args.dueAt);
 
@@ -74,7 +87,14 @@ function queueRank(args: {
   if (args.cadenceStatus === "active") cadenceBoost = 10;
   if ((args.cadenceStep ?? 0) >= 3) cadenceBoost += 5;
 
-  return args.priorityScore + urgencyBoost + kindBoost + cadenceBoost;
+  const promotionBoost = isRadarPromotion({
+    title: args.title,
+    notes: args.notes,
+  })
+    ? 1000
+    : 0;
+
+  return args.priorityScore + urgencyBoost + kindBoost + cadenceBoost + promotionBoost;
 }
 
 export async function GET(req: Request) {
@@ -97,7 +117,7 @@ export async function GET(req: Request) {
 
     const isAdmin = role === "admin" || role === "manager";
 
-    const { data: priorityRows, error: priorityErr } = await supabaseAdmin.rpc("contact_priority_scores");
+    const { data: priorityRows, error: priorityErr } = await supabaseAdmin.rpc("contact_priority_scores_v2");
 
     if (priorityErr) {
       return NextResponse.json({ error: priorityErr.message }, { status: 500 });
@@ -139,17 +159,18 @@ export async function GET(req: Request) {
         assigned_to_user_id: row.assigned_to_user_id ?? null,
         last_activity_at: row.last_activity_at ?? null,
         updated_at: row.updated_at ?? null,
-        priority_score: Number(row.score ?? row.priority_score ?? 0),
+        priority_score: Number(row.priority_score ?? 0),
         school_tier: row.school_tier ?? null,
       });
     }
 
-    let taskQuery = supabaseAdmin
+    const { data: tasksRaw, error: tasksErr } = await supabaseAdmin
       .from("tasks")
       .select(`
         id,
         contact_id,
         title,
+        notes,
         task_type,
         due_at,
         status,
@@ -160,8 +181,6 @@ export async function GET(req: Request) {
       `)
       .is("completed_at", null)
       .order("due_at", { ascending: true });
-
-    const { data: tasksRaw, error: tasksErr } = await taskQuery;
 
     if (tasksErr) {
       return NextResponse.json({ error: tasksErr.message }, { status: 500 });
@@ -185,6 +204,8 @@ export async function GET(req: Request) {
           kind: task.kind,
           cadenceStep: task.cadence_step ?? null,
           cadenceStatus: c.cadence_status,
+          title: task.title,
+          notes: task.notes,
         });
 
         return {
@@ -199,6 +220,7 @@ export async function GET(req: Request) {
           cadence_step: c.cadence_step,
           assigned_to_user_id: c.assigned_to_user_id,
           task_title: task.title,
+          task_notes: task.notes,
           task_type: task.task_type,
           task_kind: task.kind,
           task_due_at: task.due_at,
@@ -208,6 +230,10 @@ export async function GET(req: Request) {
           school_tier: c.school_tier,
           last_activity_at: c.last_activity_at,
           updated_at: c.updated_at,
+          is_radar_promotion: isRadarPromotion({
+            title: task.title,
+            notes: task.notes,
+          }),
         };
       })
       .filter(Boolean)
@@ -217,7 +243,11 @@ export async function GET(req: Request) {
 
         const dueA = a.task_due_at ? new Date(a.task_due_at).getTime() : Number.MAX_SAFE_INTEGER;
         const dueB = b.task_due_at ? new Date(b.task_due_at).getTime() : Number.MAX_SAFE_INTEGER;
-        return dueA - dueB;
+        if (dueA !== dueB) return dueA - dueB;
+
+        const updatedA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+        const updatedB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+        return updatedB - updatedA;
       })
       .slice(0, limit);
 
@@ -228,6 +258,7 @@ export async function GET(req: Request) {
       upcoming: items.filter((i: any) => i.urgency === "upcoming").length,
       cadence_items: items.filter((i: any) => i.task_kind === "cadence").length,
       manual_items: items.filter((i: any) => i.task_kind === "manual").length,
+      radar_promotions: items.filter((i: any) => i.is_radar_promotion).length,
     };
 
     return NextResponse.json({

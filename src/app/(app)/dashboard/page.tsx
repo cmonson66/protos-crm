@@ -10,6 +10,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
+type MeResponse = {
+  user_id: string;
+  role: "admin" | "manager" | "rep";
+  is_active: boolean;
+};
+
 type QueueTask = {
   task_id: string;
   contact_id: string;
@@ -49,18 +55,6 @@ type CadencePipeline = {
   completed: number;
 };
 
-type RepLeaderboardRow = {
-  user_id: string;
-  full_name: string | null;
-  email: string | null;
-  role: string | null;
-  calls_today: number;
-  emails_today: number;
-  meetings_today: number;
-  touches_today: number;
-  tasks_closed_today: number;
-};
-
 type StaleContactRow = {
   id: string | null;
   first_name: string | null;
@@ -80,8 +74,6 @@ type HeatmapRow = {
   touches: number;
 };
 
-
-
 type PriorityContactRow = {
   id: string;
   first_name: string | null;
@@ -99,6 +91,126 @@ type PriorityContactRow = {
   school_tier_score: number;
   conversion_history_score: number;
 };
+
+type OpportunityRevenueBucket = {
+  discovery_weighted: number;
+  presentation_weighted: number;
+  total_pipeline_weighted: number;
+  closed_actual: number;
+  new_opportunities: number;
+  qualified_meetings: number;
+};
+
+type OpportunityConversions = {
+  prospecting_count: number;
+  discovery_count: number;
+  presentation_count: number;
+  contract_signed_count: number;
+  prospecting_to_discovery: number;
+  discovery_to_presentation: number;
+  presentation_to_close: number;
+};
+
+type OpportunitySalesVelocity = {
+  open_opportunities: number;
+  avg_deal_size: number;
+  close_rate: number;
+  sales_cycle_days: number;
+  sales_velocity: number;
+};
+
+type OpportunitySummaryResponse = {
+  ytd: OpportunityRevenueBucket | null;
+  quarter: OpportunityRevenueBucket | null;
+  month: OpportunityRevenueBucket | null;
+  conversions: OpportunityConversions | null;
+  sales_velocity: OpportunitySalesVelocity | null;
+};
+
+type LeaderboardRow = {
+  id: string;
+  period_type: "weekly" | "monthly";
+  period_key: string;
+  rep_user_id: string;
+  rep_name: string;
+  metric_sales: number;
+  metric_revenue: number;
+  metric_calls: number;
+  metric_emails: number;
+  metric_linkedin: number;
+  metric_meetings: number;
+  metric_conversions: number;
+  metric_commissions_paid: number;
+  activity_score: number;
+  rank_override: number | null;
+  notes: string | null;
+  updated_at: string;
+  rank?: number;
+};
+
+type RankMode =
+  | "activity_score"
+  | "metric_revenue"
+  | "metric_commissions_paid";
+
+type RecentWinRow = {
+  id: string;
+  kind: "closed_won" | "meeting_booked" | "reply";
+  ts: string;
+  title: string;
+  subtitle: string | null;
+  href: string;
+  amount: number | null;
+};
+
+function currentMonthKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function currentWeekKey() {
+  const d = new Date();
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const weekNum = Math.ceil(
+    ((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7
+  );
+  return `${date.getUTCFullYear()}-W${String(weekNum).padStart(2, "0")}`;
+}
+
+function sortLeaderboard(rows: LeaderboardRow[], rankMode: RankMode) {
+  const out = [...rows];
+  out.sort((a, b) => {
+    const metric = (row: LeaderboardRow) => {
+      switch (rankMode) {
+        case "metric_revenue":
+          return Number(row.metric_revenue || 0);
+        case "metric_commissions_paid":
+          return Number(row.metric_commissions_paid || 0);
+        case "activity_score":
+        default:
+          return Number(row.activity_score || 0);
+      }
+    };
+
+    const diff = metric(b) - metric(a);
+    if (diff !== 0) return diff;
+
+    if (Number(b.metric_sales || 0) !== Number(a.metric_sales || 0)) {
+      return Number(b.metric_sales || 0) - Number(a.metric_sales || 0);
+    }
+
+    if (Number(b.metric_revenue || 0) !== Number(a.metric_revenue || 0)) {
+      return Number(b.metric_revenue || 0) - Number(a.metric_revenue || 0);
+    }
+
+    return a.rep_name.localeCompare(b.rep_name);
+  });
+
+  return out.map((row, idx) => ({ ...row, rank: idx + 1 }));
+}
 
 function fmtName(fn?: string | null, ln?: string | null) {
   const name = `${fn ?? ""} ${ln ?? ""}`.trim();
@@ -133,64 +245,267 @@ function daysSince(ts: string | null) {
   return `${diff} days since touch`;
 }
 
-function TaskLink({ t }: { t: QueueTask }) {
+function currency(n: number | null | undefined) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(Number(n || 0));
+}
+
+function percent(n: number | null | undefined) {
+  return `${Math.round(Number(n || 0) * 100)}%`;
+}
+
+function numberFmt(n: number | null | undefined) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 1,
+  }).format(Number(n || 0));
+}
+
+function roleScopeLabel(role: MeResponse["role"] | null) {
+  return role === "rep" ? "Your" : "Team";
+}
+
+function rankModeLabel(mode: RankMode) {
+  switch (mode) {
+    case "metric_revenue":
+      return "Revenue";
+    case "metric_commissions_paid":
+      return "Commission Paid";
+    case "activity_score":
+    default:
+      return "Activity Score";
+  }
+}
+
+function KpiCard({
+  label,
+  value,
+  href,
+  accent = "orange",
+  sublabel,
+}: {
+  label: string;
+  value: string | number;
+  href: string;
+  accent?: "orange" | "sky" | "emerald" | "violet" | "slate";
+  sublabel?: string;
+}) {
+  const accentTone =
+    accent === "sky"
+      ? "from-sky-50 to-white border-sky-100"
+      : accent === "emerald"
+        ? "from-emerald-50 to-white border-emerald-100"
+        : accent === "violet"
+          ? "from-violet-50 to-white border-violet-100"
+          : accent === "slate"
+            ? "from-slate-50 to-white border-slate-100"
+            : "from-orange-50 to-white border-orange-100";
+
+  return (
+    <Link href={href} className="h-full">
+      <Card
+        className={`h-full rounded-3xl border bg-gradient-to-br ${accentTone} shadow-none transition hover:-translate-y-[1px] hover:shadow-sm`}
+      >
+        <CardContent className="flex min-h-[192px] h-full flex-col justify-between p-5">
+          <div className="min-h-[56px] text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            {label}
+          </div>
+          <div className="text-3xl font-semibold tracking-tight text-slate-900">
+            {value}
+          </div>
+          <div className="pt-3 text-xs text-slate-500">{sublabel || "Open"}</div>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function SectionCard({
+  title,
+  right,
+  children,
+  dark = false,
+}: {
+  title: string;
+  right?: React.ReactNode;
+  children: React.ReactNode;
+  dark?: boolean;
+}) {
+  return (
+    <Card
+      className={
+        dark
+          ? "rounded-3xl border-0 bg-slate-900 text-white shadow-none"
+          : "crm-card rounded-3xl border-0 shadow-none"
+      }
+    >
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className={dark ? "text-lg font-semibold text-white" : "text-lg font-semibold"}>
+            {title}
+          </div>
+          {right}
+        </div>
+        <div className="mt-4">{children}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MiniStat({
+  label,
+  value,
+  tone = "slate",
+}: {
+  label: string;
+  value: string | number;
+  tone?: "slate" | "orange" | "emerald" | "sky" | "violet";
+}) {
+  const toneClass =
+    tone === "orange"
+      ? "border-orange-100 bg-orange-50"
+      : tone === "emerald"
+        ? "border-emerald-100 bg-emerald-50"
+        : tone === "sky"
+          ? "border-sky-100 bg-sky-50"
+          : tone === "violet"
+            ? "border-violet-100 bg-violet-50"
+            : "border-slate-100 bg-slate-50";
+
+  return (
+    <div className={`rounded-2xl border ${toneClass} p-4`}>
+      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+        {label}
+      </div>
+      <div className="mt-2 text-2xl font-semibold text-slate-900">{value}</div>
+    </div>
+  );
+}
+
+function PriorityRow({ c }: { c: PriorityContactRow }) {
   return (
     <Link
-      href={`/contacts/${t.contact_id}`}
-      className="block rounded-xl border p-3 hover:bg-slate-50"
+      href={`/contacts/${c.id}`}
+      className="block rounded-2xl border border-slate-200 bg-white p-3 transition hover:-translate-y-[1px] hover:bg-slate-50"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate font-semibold">{fmtContactTitle(t)}</div>
-          <div className="mt-1 truncate text-sm text-muted-foreground">
-            {fmtTaskLabel(t)}
+          <div className="font-semibold text-slate-900">
+            {c.school_name ? `${c.school_name} — ` : ""}
+            {fmtName(c.first_name, c.last_name)}
+          </div>
+
+          <div className="mt-1 text-xs text-slate-500">
+            Score drivers • RL {c.response_likelihood_score} • Cadence {c.cadence_score} •
+            Recency {c.recency_score}
+          </div>
+
+          <div className="mt-1 text-xs text-slate-500">
+            {c.status} • {c.cadence_status}
+            {c.cadence_step > 0 ? ` • Step ${c.cadence_step}` : ""} • {daysSince(c.last_activity_at)}
           </div>
         </div>
-        <div className="shrink-0 text-xs text-muted-foreground">
-          {new Date(t.due_at).toLocaleString()}
+
+        <div className="inline-flex rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-sm font-semibold text-orange-800">
+          {c.score}
         </div>
       </div>
     </Link>
   );
 }
 
-function StaleContactLink({ c }: { c: StaleContactRow }) {
-  const name = fmtName(c.first_name, c.last_name);
-  const title = c.school_name ? `${c.school_name} — ${name}` : name;
-  const href = c.id ? `/contacts/${c.id}` : "/contacts";
+function StaleContactRowCard({ c }: { c: StaleContactRow }) {
+  const title = c.school_name
+    ? `${c.school_name} — ${fmtName(c.first_name, c.last_name)}`
+    : fmtName(c.first_name, c.last_name);
 
   return (
     <Link
-      href={href}
-      className="block rounded-xl border p-3 hover:bg-slate-50"
+      href={c.id ? `/contacts/${c.id}` : "/contacts"}
+      className="block rounded-2xl border border-slate-200 bg-white p-3 transition hover:-translate-y-[1px] hover:bg-slate-50"
+    >
+      <div className="font-semibold text-slate-900">{title}</div>
+      <div className="mt-1 text-xs text-slate-500">
+        {c.status} • {c.cadence_status}
+      </div>
+      <div className="mt-1 text-xs text-slate-500">
+        {c.last_activity_at
+          ? `Last touch: ${new Date(c.last_activity_at).toLocaleString()}`
+          : "Last touch: none"}
+      </div>
+    </Link>
+  );
+}
+
+function RecentWinRowCard({ row }: { row: RecentWinRow }) {
+  const tone =
+    row.kind === "closed_won"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : row.kind === "meeting_booked"
+        ? "border-sky-200 bg-sky-50 text-sky-700"
+        : "border-violet-200 bg-violet-50 text-violet-700";
+
+  const label =
+    row.kind === "closed_won"
+      ? "Closed Won"
+      : row.kind === "meeting_booked"
+        ? "Meeting Booked"
+        : "Reply";
+
+  return (
+    <Link
+      href={row.href}
+      className="block rounded-2xl border border-slate-200 bg-white p-3 transition hover:-translate-y-[1px] hover:bg-slate-50"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate font-semibold">{title}</div>
-          <div className="mt-1 truncate text-sm text-muted-foreground">
-            {c.sport ?? ""} • {c.status} • {c.cadence_status}
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${tone}`}>
+              {label}
+            </span>
           </div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            {c.last_activity_at
-              ? `Last touch: ${new Date(c.last_activity_at).toLocaleString()}`
-              : "Last touch: none"}
+
+          <div className="mt-2 font-semibold text-slate-900">{row.title}</div>
+
+          {row.subtitle ? (
+            <div className="mt-1 text-sm text-slate-600">{row.subtitle}</div>
+          ) : null}
+
+          <div className="mt-1 text-xs text-slate-500">
+            {new Date(row.ts).toLocaleString()}
           </div>
         </div>
+
+        {row.amount != null ? (
+          <div className="shrink-0 text-sm font-semibold text-emerald-700">
+            {currency(row.amount)}
+          </div>
+        ) : null}
       </div>
     </Link>
   );
 }
 
 export default function DashboardPage() {
+  const [me, setMe] = useState<MeResponse | null>(null);
+
   const [dueTodayRows, setDueTodayRows] = useState<QueueTask[]>([]);
   const [dueSoonRows, setDueSoonRows] = useState<QueueTask[]>([]);
   const [kpis, setKpis] = useState<TaskKpis | null>(null);
   const [activityKpis, setActivityKpis] = useState<ActivityKpis | null>(null);
   const [cadencePipeline, setCadencePipeline] = useState<CadencePipeline | null>(null);
-  const [repLeaderboard, setRepLeaderboard] = useState<RepLeaderboardRow[]>([]);
   const [staleContacts, setStaleContacts] = useState<StaleContactRow[]>([]);
   const [heatmap, setHeatmap] = useState<HeatmapRow[]>([]);
   const [priorityContacts, setPriorityContacts] = useState<PriorityContactRow[]>([]);
+  const [opportunitySummary, setOpportunitySummary] =
+    useState<OpportunitySummaryResponse | null>(null);
+  const [weeklyLeaderboard, setWeeklyLeaderboard] = useState<LeaderboardRow[]>([]);
+  const [monthlyLeaderboard, setMonthlyLeaderboard] = useState<LeaderboardRow[]>([]);
+  const [recentWins, setRecentWins] = useState<RecentWinRow[]>([]);
+  const [leaderboardMode, setLeaderboardMode] =
+    useState<RankMode>("activity_score");
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -201,159 +516,200 @@ export default function DashboardPage() {
   const abortRef = useRef<AbortController | null>(null);
   const loadIdRef = useRef(0);
 
-async function load() {
-  const myLoadId = ++loadIdRef.current;
+  async function load() {
+    const myLoadId = ++loadIdRef.current;
 
-  if (abortRef.current) abortRef.current.abort();
-  const ac = new AbortController();
-  abortRef.current = ac;
+    if (abortRef.current) abortRef.current.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
 
-  setErr(null);
-  setLoading(true);
+    setErr(null);
+    setLoading(true);
 
-  async function safeJson(res: Response | undefined) {
-    if (!res) return {};
     try {
-      return await res.json();
-    } catch {
-      return {};
+      const [
+        meRes,
+        dueTodayRes,
+        dueSoonRes,
+        kpiRes,
+        activityRes,
+        cadenceRes,
+        staleRes,
+        heatmapRes,
+        priorityRes,
+        opportunitySummaryRes,
+        weeklyLeaderboardRes,
+        monthlyLeaderboardRes,
+        recentWinsRes,
+      ] = await Promise.all([
+        fetchWithAuth("/api/auth/me", { signal: ac.signal }),
+        fetchWithAuth(`/api/tasks/due-today?tz=${encodeURIComponent(tz)}`, {
+          signal: ac.signal,
+        }),
+        fetchWithAuth(
+          `/api/tasks/due-soon?tz=${encodeURIComponent(tz)}&days=${dueSoonDays}`,
+          { signal: ac.signal }
+        ),
+        fetchWithAuth(
+          `/api/dashboard/task-kpis?tz=${encodeURIComponent(
+            tz
+          )}&dueSoonDays=${dueSoonDays}`,
+          { signal: ac.signal }
+        ),
+        fetchWithAuth(`/api/dashboard/activity-kpis?tz=${encodeURIComponent(tz)}`, {
+          signal: ac.signal,
+        }),
+        fetchWithAuth(`/api/dashboard/cadence-pipeline`, {
+          signal: ac.signal,
+        }),
+        fetchWithAuth(`/api/dashboard/stale-contacts`, {
+          signal: ac.signal,
+        }),
+        fetchWithAuth(`/api/dashboard/activity-heatmap`, {
+          signal: ac.signal,
+        }),
+        fetchWithAuth(`/api/dashboard/priority-contacts`, {
+          signal: ac.signal,
+        }),
+        fetchWithAuth(`/api/dashboard/opportunity-summary`, {
+          signal: ac.signal,
+        }),
+        fetchWithAuth(
+          `/api/leaderboard/list?period_type=weekly&period_key=${encodeURIComponent(
+            currentWeekKey()
+          )}`,
+          { signal: ac.signal }
+        ),
+        fetchWithAuth(
+          `/api/leaderboard/list?period_type=monthly&period_key=${encodeURIComponent(
+            currentMonthKey()
+          )}`,
+          { signal: ac.signal }
+        ),
+        fetchWithAuth(`/api/dashboard/recent-wins`, {
+          signal: ac.signal,
+        }),
+      ]);
+
+      if (loadIdRef.current !== myLoadId) return;
+
+      const meJson = await meRes.json().catch(() => ({}));
+      const dueTodayJson = await dueTodayRes.json().catch(() => ({}));
+      const dueSoonJson = await dueSoonRes.json().catch(() => ({}));
+      const kpiJson = await kpiRes.json().catch(() => ({}));
+      const activityJson = await activityRes.json().catch(() => ({}));
+      const cadenceJson = await cadenceRes.json().catch(() => ({}));
+      const staleJson = await staleRes.json().catch(() => ({}));
+      const heatmapJson = await heatmapRes.json().catch(() => ({}));
+      const priorityJson = await priorityRes.json().catch(() => ({}));
+      const opportunitySummaryJson = await opportunitySummaryRes.json().catch(() => ({}));
+      const weeklyLeaderboardJson = await weeklyLeaderboardRes.json().catch(() => ({}));
+      const monthlyLeaderboardJson = await monthlyLeaderboardRes.json().catch(() => ({}));
+      const recentWinsJson = await recentWinsRes.json().catch(() => ({}));
+
+      if (meRes.ok) setMe(meJson as MeResponse);
+      else setMe(null);
+
+      if (!dueTodayRes.ok) {
+        setErr(dueTodayJson?.error ?? "Failed to load due-today tasks");
+        setDueTodayRows([]);
+      } else {
+        setDueTodayRows((dueTodayJson.data ?? []) as QueueTask[]);
+      }
+
+      if (!dueSoonRes.ok) {
+        setErr((prev) => prev || dueSoonJson?.error || "Failed to load due-soon tasks");
+        setDueSoonRows([]);
+      } else {
+        setDueSoonRows((dueSoonJson.data ?? []) as QueueTask[]);
+      }
+
+      if (!kpiRes.ok) {
+        setErr((prev) => prev || kpiJson?.error || "Failed to load task KPIs");
+        setKpis(null);
+      } else {
+        setKpis((kpiJson.data ?? null) as TaskKpis | null);
+      }
+
+      if (!activityRes.ok) {
+        setErr((prev) => prev || activityJson?.error || "Failed to load activity KPIs");
+        setActivityKpis(null);
+      } else {
+        setActivityKpis((activityJson.data ?? null) as ActivityKpis | null);
+      }
+
+      if (!cadenceRes.ok) {
+        setErr((prev) => prev || cadenceJson?.error || "Failed to load cadence pipeline");
+        setCadencePipeline(null);
+      } else {
+        setCadencePipeline((cadenceJson.data ?? null) as CadencePipeline | null);
+      }
+
+      if (!staleRes.ok) {
+        setErr((prev) => prev || staleJson?.error || "Failed to load stale contacts");
+        setStaleContacts([]);
+      } else {
+        setStaleContacts((staleJson.data ?? []) as StaleContactRow[]);
+      }
+
+      if (!heatmapRes.ok) {
+        setErr((prev) => prev || heatmapJson?.error || "Failed to load activity heatmap");
+        setHeatmap([]);
+      } else {
+        const raw = (heatmapJson.data ?? []) as HeatmapRow[];
+        const mapByHour = new Map(raw.map((h) => [Number(h.hour), Number(h.touches)]));
+        const fullDay: HeatmapRow[] = Array.from({ length: 24 }, (_, hour) => ({
+          hour,
+          touches: mapByHour.get(hour) ?? 0,
+        }));
+        setHeatmap(fullDay);
+      }
+
+      if (!priorityRes.ok) {
+        setErr((prev) => prev || priorityJson?.error || "Failed to load priority contacts");
+        setPriorityContacts([]);
+      } else {
+        setPriorityContacts((priorityJson.data ?? []) as PriorityContactRow[]);
+      }
+
+      if (!opportunitySummaryRes.ok) {
+        setErr(
+          (prev) => prev || opportunitySummaryJson?.error || "Failed to load opportunity summary"
+        );
+        setOpportunitySummary(null);
+      } else {
+        setOpportunitySummary(
+          (opportunitySummaryJson.data ?? null) as OpportunitySummaryResponse | null
+        );
+      }
+
+      if (!weeklyLeaderboardRes.ok) {
+        setErr((prev) => prev || weeklyLeaderboardJson?.error || "Failed to load weekly leaderboard");
+        setWeeklyLeaderboard([]);
+      } else {
+        setWeeklyLeaderboard((weeklyLeaderboardJson.data ?? []) as LeaderboardRow[]);
+      }
+
+      if (!monthlyLeaderboardRes.ok) {
+        setErr((prev) => prev || monthlyLeaderboardJson?.error || "Failed to load monthly leaderboard");
+        setMonthlyLeaderboard([]);
+      } else {
+        setMonthlyLeaderboard((monthlyLeaderboardJson.data ?? []) as LeaderboardRow[]);
+      }
+
+      if (!recentWinsRes.ok) {
+        setRecentWins([]);
+      } else {
+        setRecentWins((recentWinsJson.data ?? []) as RecentWinRow[]);
+      }
+    } catch (e: any) {
+      if (e?.name !== "AbortError") {
+        setErr(e?.message || "Failed to load dashboard");
+      }
+    } finally {
+      if (loadIdRef.current === myLoadId) setLoading(false);
     }
   }
-
-  try {
-    const results = await Promise.all([
-      fetchWithAuth(`/api/tasks/due-today?tz=${encodeURIComponent(tz)}`, {
-        signal: ac.signal,
-      }),
-      fetchWithAuth(
-        `/api/tasks/due-soon?tz=${encodeURIComponent(tz)}&days=${dueSoonDays}`,
-        { signal: ac.signal }
-      ),
-      fetchWithAuth(
-        `/api/dashboard/task-kpis?tz=${encodeURIComponent(
-          tz
-        )}&dueSoonDays=${dueSoonDays}`,
-        { signal: ac.signal }
-      ),
-      fetchWithAuth(`/api/dashboard/activity-kpis?tz=${encodeURIComponent(tz)}`, {
-        signal: ac.signal,
-      }),
-      fetchWithAuth(`/api/dashboard/cadence-pipeline`, {
-        signal: ac.signal,
-      }),
-      fetchWithAuth(`/api/dashboard/rep-leaderboard`, {
-        signal: ac.signal,
-      }),
-      fetchWithAuth(`/api/dashboard/stale-contacts`, {
-        signal: ac.signal,
-      }),
-      fetchWithAuth(`/api/dashboard/activity-heatmap`, {
-        signal: ac.signal,
-      }),
-      fetchWithAuth(`/api/dashboard/priority-contacts`, {
-        signal: ac.signal,
-      }),
-    ]);
-
-    if (loadIdRef.current !== myLoadId) return;
-
-    const dueTodayRes = results[0];
-    const dueSoonRes = results[1];
-    const kpiRes = results[2];
-    const activityRes = results[3];
-    const cadenceRes = results[4];
-    const leaderboardRes = results[5];
-    const staleRes = results[6];
-    const heatmapRes = results[7];
-    const priorityRes = results[8];
-
-    const dueTodayJson = await safeJson(dueTodayRes);
-    const dueSoonJson = await safeJson(dueSoonRes);
-    const kpiJson = await safeJson(kpiRes);
-    const activityJson = await safeJson(activityRes);
-    const cadenceJson = await safeJson(cadenceRes);
-    const leaderboardJson = await safeJson(leaderboardRes);
-    const staleJson = await safeJson(staleRes);
-    const heatmapJson = await safeJson(heatmapRes);
-    const priorityJson = await safeJson(priorityRes);
-
-    if (!dueTodayRes?.ok) {
-      setErr((dueTodayJson as any)?.error ?? "Failed to load due-today tasks");
-      setDueTodayRows([]);
-    } else {
-      setDueTodayRows((((dueTodayJson as any).data) ?? []) as QueueTask[]);
-    }
-
-    if (!dueSoonRes?.ok) {
-      setErr((prev) => prev || (dueSoonJson as any)?.error || "Failed to load due-soon tasks");
-      setDueSoonRows([]);
-    } else {
-      setDueSoonRows((((dueSoonJson as any).data) ?? []) as QueueTask[]);
-    }
-
-    if (!kpiRes?.ok) {
-      setErr((prev) => prev || (kpiJson as any)?.error || "Failed to load task KPIs");
-      setKpis(null);
-    } else {
-      setKpis((((kpiJson as any).data) ?? null) as TaskKpis | null);
-    }
-
-    if (!activityRes?.ok) {
-      setErr((prev) => prev || (activityJson as any)?.error || "Failed to load activity KPIs");
-      setActivityKpis(null);
-    } else {
-      setActivityKpis((((activityJson as any).data) ?? null) as ActivityKpis | null);
-    }
-
-    if (!cadenceRes?.ok) {
-      setErr((prev) => prev || (cadenceJson as any)?.error || "Failed to load cadence pipeline");
-      setCadencePipeline(null);
-    } else {
-      setCadencePipeline((((cadenceJson as any).data) ?? null) as CadencePipeline | null);
-    }
-
-    if (!leaderboardRes?.ok) {
-      setErr((prev) => prev || (leaderboardJson as any)?.error || "Failed to load rep leaderboard");
-      setRepLeaderboard([]);
-    } else {
-      setRepLeaderboard((((leaderboardJson as any).data) ?? []) as RepLeaderboardRow[]);
-    }
-
-    if (!staleRes?.ok) {
-      setErr((prev) => prev || (staleJson as any)?.error || "Failed to load stale contacts");
-      setStaleContacts([]);
-    } else {
-      setStaleContacts((((staleJson as any).data) ?? []) as StaleContactRow[]);
-    }
-
-    if (!heatmapRes?.ok) {
-      setErr((prev) => prev || (heatmapJson as any)?.error || "Failed to load activity heatmap");
-      setHeatmap([]);
-    } else {
-      const raw = ((((heatmapJson as any).data) ?? []) as HeatmapRow[]);
-      const mapByHour = new Map(raw.map((h) => [Number(h.hour), Number(h.touches)]));
-      const fullDay: HeatmapRow[] = Array.from({ length: 24 }, (_, hour) => ({
-        hour,
-        touches: mapByHour.get(hour) ?? 0,
-      }));
-      setHeatmap(fullDay);
-    }
-
-    if (!priorityRes?.ok) {
-      setErr((prev) => prev || (priorityJson as any)?.error || "Failed to load priority contacts");
-      setPriorityContacts([]);
-    } else {
-      setPriorityContacts((((priorityJson as any).data) ?? []) as PriorityContactRow[]);
-    }
-  } catch (e: any) {
-    if (e?.name !== "AbortError") {
-      setErr(e?.message || "Failed to load dashboard");
-    }
-  } finally {
-    if (loadIdRef.current === myLoadId) setLoading(false);
-  }
-}
-
 
   const { overdueList, dueTodayList } = useMemo(() => {
     const overdueList = dueTodayRows.filter((r) => r.cadence_bucket === "OVERDUE");
@@ -362,35 +718,37 @@ async function load() {
   }, [dueTodayRows]);
 
   async function goToNextWorkItem() {
-  try {
-    const res = await fetchWithAuth("/api/work-queue/next");
-    const json = await res.json().catch(() => ({}));
+    try {
+      const res = await fetchWithAuth("/api/work-queue/next");
+      const json = await res.json().catch(() => ({}));
 
-    if (res.ok && json?.data?.contact_id) {
-      window.location.assign(`/contacts/${json.data.contact_id}`);
+      if (res.ok && json?.data?.contact_id) {
+        window.location.assign(`/contacts/${json.data.contact_id}`);
+        return;
+      }
+    } catch {}
+
+    const firstTask = overdueList[0] || dueTodayList[0] || dueSoonRows[0] || null;
+
+    if (firstTask) {
+      window.location.assign(`/contacts/${firstTask.contact_id}`);
       return;
     }
-  } catch {}
 
-  const firstTask =
-    overdueList[0] ||
-    dueTodayList[0] ||
-    dueSoonRows[0] ||
-    null;
+    const firstPriority = priorityContacts[0] || null;
+    if (firstPriority?.id) {
+      window.location.assign(`/contacts/${firstPriority.id}`);
+      return;
+    }
 
-  if (firstTask) {
-    window.location.assign(`/contacts/${firstTask.contact_id}`);
-    return;
+    const firstStale = staleContacts[0] || null;
+    if (firstStale?.id) {
+      window.location.assign(`/contacts/${firstStale.id}`);
+      return;
+    }
+
+    window.location.assign("/contacts");
   }
-
-  const firstStale = staleContacts[0] || null;
-  if (firstStale?.id) {
-    window.location.assign(`/contacts/${firstStale.id}`);
-    return;
-  }
-
-  window.location.assign("/contacts");
-}
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -409,10 +767,10 @@ async function load() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [overdueList, dueTodayList, dueSoonRows, staleContacts]);
+  }, [overdueList, dueTodayList, dueSoonRows, priorityContacts, staleContacts]);
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
   useEffect(() => {
@@ -420,7 +778,7 @@ async function load() {
 
     const scheduleReload = () => {
       if (t) clearTimeout(t);
-      t = setTimeout(() => load(), 1000);
+      t = setTimeout(() => void load(), 900);
     };
 
     const channel = supabase
@@ -450,6 +808,16 @@ async function load() {
         { event: "UPDATE", schema: "public", table: "contacts" },
         scheduleReload
       )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "opportunities" },
+        scheduleReload
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "opportunities" },
+        scheduleReload
+      )
       .subscribe();
 
     return () => {
@@ -459,465 +827,588 @@ async function load() {
     };
   }, []);
 
+  const scopeLabel = roleScopeLabel(me?.role ?? null);
   const overdueCount = kpis?.overdue ?? overdueList.length;
   const dueTodayCount = kpis?.due_today ?? dueTodayList.length;
   const dueSoonCount = kpis?.due_soon ?? dueSoonRows.length;
-  const closedAllTimeCount = kpis?.closed_all_time ?? 0;
-  const maxHeat = Math.max(1, ...heatmap.map((h) => h.touches));
-    const pressure = {
-    overdue: overdueCount,
-    due_today: dueTodayCount,
-    due_soon: dueSoonCount,
-  };
+  const urgentContactsCount = priorityContacts.length;
+  const staleContactsCount = staleContacts.length;
+  const backlogCount = overdueCount + dueTodayCount + dueSoonCount + staleContactsCount;
 
+  const weeklySummary = useMemo(() => {
+    return weeklyLeaderboard.reduce(
+      (acc, row) => {
+        acc.meetings += Number(row.metric_meetings || 0);
+        return acc;
+      },
+      { meetings: 0 }
+    );
+  }, [weeklyLeaderboard]);
+
+  const monthlySummary = useMemo(() => {
+    return monthlyLeaderboard.reduce(
+      (acc, row) => {
+        acc.sales += Number(row.metric_sales || 0);
+        acc.revenue += Number(row.metric_revenue || 0);
+        acc.commissions += Number(row.metric_commissions_paid || 0);
+        return acc;
+      },
+      { sales: 0, revenue: 0, commissions: 0 }
+    );
+  }, [monthlyLeaderboard]);
+
+  const rankedLeaderboard = useMemo(() => {
+    return sortLeaderboard(monthlyLeaderboard, leaderboardMode);
+  }, [monthlyLeaderboard, leaderboardMode]);
+
+  const topFiveLeaderboard = rankedLeaderboard.slice(0, 5);
+
+  const myLeaderboardRow = useMemo(() => {
+    if (!me?.user_id) return null;
+    return rankedLeaderboard.find((r) => r.rep_user_id === me.user_id) || null;
+  }, [rankedLeaderboard, me]);
+
+  const topRep = rankedLeaderboard[0] || null;
+
+  const nextTask = overdueList[0] || dueTodayList[0] || dueSoonRows[0] || null;
+  const nextContact = priorityContacts[0] || null;
+
+  const maxHeat = Math.max(1, ...heatmap.map((h) => h.touches));
+
+  const controlCenterTitle =
+    me?.role === "rep" ? "Today’s Control Center" : "Team Control Center";
+
+  const leaderboardPanelTitle =
+    me?.role === "rep" ? "Leaderboard Snapshot" : "Team Leaderboard";
+
+  const repEfficiency = useMemo(() => {
+    const calls = activityKpis?.calls_today ?? 0;
+    const emails = activityKpis?.emails_today ?? 0;
+    const meetings = activityKpis?.meetings_today ?? 0;
+    const touches = activityKpis?.touches_today ?? 0;
+    const touchTime = activityKpis?.avg_touch_seconds_today ?? 0;
+
+    return {
+      calls,
+      emails,
+      meetings,
+      touches,
+      touchTime,
+    };
+  }, [activityKpis]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <PageHeader
         title="Dashboard"
         subtitle={
           loading
-            ? "Loading…"
+            ? "Loading live operating view..."
             : err
-            ? err
-            : "Work Queue jumps to the next best contact: overdue, due today, due soon, then stale."
+              ? err
+              : me?.role === "rep"
+                ? "Your daily command dashboard for execution, conversion, and momentum."
+                : "Live team operating view across execution, conversion, and coaching."
         }
         actions={
           <div className="flex items-center gap-2">
-            <Button className="rounded-xl" onClick={goToNextWorkItem}>
+            <Button
+              className="crm-button-primary rounded-xl border-0"
+              onClick={goToNextWorkItem}
+            >
               Work Queue
             </Button>
-            <Button variant="outline" className="rounded-xl" onClick={load}>
+            <Button
+              variant="outline"
+              className="crm-button rounded-xl border-0"
+              onClick={() => void load()}
+            >
               Refresh
             </Button>
           </div>
         }
       />
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="text-sm text-muted-foreground">Overdue</div>
-            <div className="mt-2 text-3xl font-semibold">{overdueCount}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="text-sm text-muted-foreground">Due Today</div>
-            <div className="mt-2 text-3xl font-semibold">{dueTodayCount}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="text-sm text-muted-foreground">Due Soon ({dueSoonDays}d)</div>
-            <div className="mt-2 text-3xl font-semibold">{dueSoonCount}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="text-sm text-muted-foreground">Closed (all time)</div>
-            <div className="mt-2 text-3xl font-semibold">{closedAllTimeCount}</div>
-          </CardContent>
-        </Card>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <KpiCard
+          label={`${scopeLabel} Open Tasks Due Today`}
+          value={dueTodayCount}
+          href="/tasks"
+          accent="orange"
+          sublabel="Open the task queue"
+        />
+        <KpiCard
+          label={`${scopeLabel} Contacts Due Now`}
+          value={urgentContactsCount}
+          href="/work-queue"
+          accent="sky"
+          sublabel="Combined urgency bucket"
+        />
+        <KpiCard
+          label={`${scopeLabel} Meetings This Week`}
+          value={weeklySummary.meetings}
+          href="/leaderboard"
+          accent="violet"
+          sublabel="Weekly leaderboard meetings"
+        />
+        <KpiCard
+          label={`${scopeLabel} Sales This Month`}
+          value={monthlySummary.sales}
+          href="/opportunities"
+          accent="emerald"
+          sublabel="Closed won count"
+        />
+        <KpiCard
+          label={`${scopeLabel} Revenue This Month`}
+          value={currency(monthlySummary.revenue)}
+          href="/opportunities"
+          accent="orange"
+          sublabel="Closed won revenue"
+        />
+        <KpiCard
+          label={`${scopeLabel} Commission Paid This Month`}
+          value={currency(monthlySummary.commissions)}
+          href="/leaderboard"
+          accent="slate"
+          sublabel="Paid rep commissions"
+        />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-5">
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="text-sm text-muted-foreground">Touches Today</div>
-            <div className="mt-2 text-3xl font-semibold">
-              {activityKpis?.touches_today ?? 0}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="text-sm text-muted-foreground">Calls Today</div>
-            <div className="mt-2 text-3xl font-semibold">
-              {activityKpis?.calls_today ?? 0}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="text-sm text-muted-foreground">Emails Today</div>
-            <div className="mt-2 text-3xl font-semibold">
-              {activityKpis?.emails_today ?? 0}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="text-sm text-muted-foreground">Meetings Today</div>
-            <div className="mt-2 text-3xl font-semibold">
-              {activityKpis?.meetings_today ?? 0}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="text-sm text-muted-foreground">Avg Touch Time</div>
-            <div className="mt-2 text-3xl font-semibold">
-              {fmtDuration(activityKpis?.avg_touch_seconds_today ?? 0)}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-5">
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="text-sm text-muted-foreground">Cadence Inactive</div>
-            <div className="mt-2 text-3xl font-semibold">
-              {cadencePipeline?.inactive ?? 0}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="text-sm text-muted-foreground">Active Step 1</div>
-            <div className="mt-2 text-3xl font-semibold">
-              {cadencePipeline?.step1 ?? 0}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="text-sm text-muted-foreground">Active Step 2</div>
-            <div className="mt-2 text-3xl font-semibold">
-              {cadencePipeline?.step2 ?? 0}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="text-sm text-muted-foreground">Active Step 3+</div>
-            <div className="mt-2 text-3xl font-semibold">
-              {cadencePipeline?.step3plus ?? 0}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="text-sm text-muted-foreground">Cadence Completed</div>
-            <div className="mt-2 text-3xl font-semibold">
-              {cadencePipeline?.completed ?? 0}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-3">
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <div className="text-lg font-semibold">Overdue</div>
-              <Badge variant="destructive" className="rounded-xl">
-                {overdueList.length}
-              </Badge>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              {loading ? (
-                <div className="text-sm text-muted-foreground">Loading…</div>
-              ) : overdueList.length === 0 ? (
-                <div className="text-sm text-muted-foreground">Nothing overdue.</div>
-              ) : (
-                overdueList.slice(0, 10).map((t) => <TaskLink key={t.task_id} t={t} />)
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <div className="text-lg font-semibold">Due Today</div>
-              <Badge className="rounded-xl">{dueTodayList.length}</Badge>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              {loading ? (
-                <div className="text-sm text-muted-foreground">Loading…</div>
-              ) : dueTodayList.length === 0 ? (
-                <div className="text-sm text-muted-foreground">No tasks due today.</div>
-              ) : (
-                dueTodayList.slice(0, 10).map((t) => <TaskLink key={t.task_id} t={t} />)
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <div className="text-lg font-semibold">Due Soon</div>
-              <Badge variant="secondary" className="rounded-xl">
-                {dueSoonRows.length}
-              </Badge>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              {loading ? (
-                <div className="text-sm text-muted-foreground">Loading…</div>
-              ) : dueSoonRows.length === 0 ? (
-                <div className="text-sm text-muted-foreground">Nothing due soon.</div>
-              ) : (
-                dueSoonRows.slice(0, 10).map((t) => <TaskLink key={t.task_id} t={t} />)
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-3">
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="font-semibold mb-3">Rep Activity Today</div>
-
-            <div className="flex items-end gap-1">
-              {heatmap.map((h) => (
-                <div key={h.hour} className="flex flex-col items-center gap-1">
-                  <div
-                    title={`${String(h.hour).padStart(2, "0")}:00 — ${h.touches} touches`}
-                    className="w-3 rounded-sm"
-                    style={{
-                      height: `${Math.max(10, (h.touches / maxHeat) * 60)}px`,
-                      opacity: Math.max(0.15, h.touches / maxHeat),
-                      backgroundColor: "rgb(79 70 229)",
-                    }}
-                  />
-                  <div className="text-[10px] text-muted-foreground">
-                    {h.hour}
-                  </div>
+      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">
+        <SectionCard
+          title={controlCenterTitle}
+          right={
+            <Badge className="rounded-xl bg-white text-slate-700 hover:bg-white">
+              Queue backlog {backlogCount}
+            </Badge>
+          }
+        >
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                  {me?.role === "rep" ? "My Next Contact" : "Highest Priority Contact"}
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="font-semibold">Work Queue Pressure</div>
-
-            <div className="mt-4 space-y-3">
-              <div>
-                <div className="flex items-center justify-between text-sm">
-                  <span>Overdue</span>
-                  <span className="font-semibold">{pressure.overdue}
-</span>
-                </div>
-                <div className="mt-1 h-2 w-full rounded-full bg-slate-200">
-                  <div
-                    className="h-2 rounded-full bg-red-500"
-                    style={{
-                      width: `${Math.min(pressure.overdue * 10, 100)}%`,
-
-                    }}
-                  />
-                </div>
+                {!nextContact ? (
+                  <div className="mt-3 text-sm text-slate-500">No urgent contact surfaced.</div>
+                ) : (
+                  <>
+                    <div className="mt-2 text-lg font-semibold text-slate-900">
+                      {nextContact.school_name ? `${nextContact.school_name} — ` : ""}
+                      {fmtName(nextContact.first_name, nextContact.last_name)}
+                    </div>
+                    <div className="mt-1 text-sm text-slate-600">
+                      Score {nextContact.score} • {nextContact.status} •{" "}
+                      {nextContact.cadence_status}
+                      {nextContact.cadence_step > 0 ? ` • Step ${nextContact.cadence_step}` : ""}
+                    </div>
+                    <div className="mt-3">
+                      <Link href={`/contacts/${nextContact.id}`} className="crm-button inline-block px-4 py-2">
+                        Open Contact
+                      </Link>
+                    </div>
+                  </>
+                )}
               </div>
 
-              <div>
-                <div className="flex items-center justify-between text-sm">
-                  <span>Due Today</span>
-                  <span className="font-semibold">{pressure.due_today}</span>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                  {me?.role === "rep" ? "My Next Task" : "Next Team Task"}
                 </div>
-                <div className="mt-1 h-2 w-full rounded-full bg-slate-200">
-                  <div
-                    className="h-2 rounded-full bg-amber-500"
-                    style={{
-                      width: `${Math.min(pressure.due_today * 10, 100)}%`,
-                    }}
-                  />
-                </div>
+                {!nextTask ? (
+                  <div className="mt-3 text-sm text-slate-500">No open task surfaced.</div>
+                ) : (
+                  <>
+                    <div className="mt-2 text-lg font-semibold text-slate-900">
+                      {fmtTaskLabel(nextTask)}
+                    </div>
+                    <div className="mt-1 text-sm text-slate-600">
+                      {fmtContactTitle(nextTask)} • {new Date(nextTask.due_at).toLocaleString()}
+                    </div>
+                    <div className="mt-3">
+                      <Link
+                        href={`/contacts/${nextTask.contact_id}`}
+                        className="crm-button inline-block px-4 py-2"
+                      >
+                        Open Task Contact
+                      </Link>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <MiniStat label="Overdue" value={overdueCount} tone="orange" />
+                <MiniStat label="Urgent Contacts" value={urgentContactsCount} tone="sky" />
+                <MiniStat label="No Touch 7+ Days" value={staleContactsCount} tone="violet" />
+                <MiniStat label="Due Soon" value={dueSoonCount} tone="slate" />
               </div>
 
-              <div>
-                <div className="flex items-center justify-between text-sm">
-                  <span>Due Soon</span>
-                  <span className="font-semibold">{pressure.due_soon}</span>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                  {me?.role === "rep" ? "Current Leaderboard Position" : "Top Rep Right Now"}
                 </div>
-                <div className="mt-1 h-2 w-full rounded-full bg-slate-200">
-                  <div
-                    className="h-2 rounded-full bg-blue-500"
-                    style={{
-                      width: `${Math.min(pressure.due_soon * 10, 100)}%`,
-                    }}
-                  />
+
+                {me?.role === "rep" ? (
+                  myLeaderboardRow ? (
+                    <>
+                      <div className="mt-2 text-3xl font-semibold text-slate-900">
+                        #{myLeaderboardRow.rank}
+                      </div>
+                      <div className="mt-1 text-sm text-slate-600">
+                        Ranked by {rankModeLabel(leaderboardMode)} •{" "}
+                        {rankModeLabel(leaderboardMode) === "Revenue"
+                          ? currency(myLeaderboardRow.metric_revenue)
+                          : rankModeLabel(leaderboardMode) === "Commission Paid"
+                            ? currency(myLeaderboardRow.metric_commissions_paid)
+                            : numberFmt(myLeaderboardRow.activity_score)}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="mt-3 text-sm text-slate-500">No current rank available.</div>
+                  )
+                ) : topRep ? (
+                  <>
+                    <div className="mt-2 text-lg font-semibold text-slate-900">
+                      {topRep.rep_name}
+                    </div>
+                    <div className="mt-1 text-sm text-slate-600">
+                      #{topRep.rank} • {rankModeLabel(leaderboardMode)} •{" "}
+                      {leaderboardMode === "metric_revenue"
+                        ? currency(topRep.metric_revenue)
+                        : leaderboardMode === "metric_commissions_paid"
+                          ? currency(topRep.metric_commissions_paid)
+                          : numberFmt(topRep.activity_score)}
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-3 text-sm text-slate-500">No leaderboard data.</div>
+                )}
+
+                <div className="mt-3">
+                  <Link href="/leaderboard" className="crm-button inline-block px-4 py-2">
+                    Open Leaderboard
+                  </Link>
                 </div>
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="font-semibold mb-3">High Priority Leads</div>
+        <SectionCard
+          title={leaderboardPanelTitle}
+          dark
+          right={
+            <div className="flex items-center gap-2">
+              <select
+                value={leaderboardMode}
+                onChange={(e) => setLeaderboardMode(e.target.value as RankMode)}
+                className="rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-sm text-white outline-none"
+              >
+                <option value="activity_score" className="text-slate-900">
+                  Activity
+                </option>
+                <option value="metric_revenue" className="text-slate-900">
+                  Revenue
+                </option>
+                <option value="metric_commissions_paid" className="text-slate-900">
+                  Commission
+                </option>
+              </select>
+            </div>
+          }
+        >
+          <div className="space-y-3">
+            {topFiveLeaderboard.length === 0 ? (
+              <div className="text-sm text-slate-300">No leaderboard data available.</div>
+            ) : (
+              topFiveLeaderboard.map((row) => {
+                const isMe = me?.user_id === row.rep_user_id;
+                const metricValue =
+                  leaderboardMode === "metric_revenue"
+                    ? currency(row.metric_revenue)
+                    : leaderboardMode === "metric_commissions_paid"
+                      ? currency(row.metric_commissions_paid)
+                      : numberFmt(row.activity_score);
 
-            <div className="space-y-2">
-              {priorityContacts.length === 0 ? (
-                <div className="text-sm text-muted-foreground">No priority leads found.</div>
-              ) : (
-                priorityContacts.map((c) => (
+                return (
                   <Link
-                    key={c.id}
-                    href={`/contacts/${c.id}`}
-                    className="block rounded-xl border p-3 hover:bg-slate-50"
+                    key={row.id}
+                    href="/leaderboard"
+                    className={`block rounded-2xl border px-4 py-3 transition hover:bg-white/10 ${
+                      isMe
+                        ? "border-emerald-300/40 bg-emerald-400/10"
+                        : "border-white/10 bg-white/5"
+                    }`}
                   >
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="font-semibold">
-                          {c.school_name ? `${c.school_name} — ` : ""}
-                          {fmtName(c.first_name, c.last_name)}
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold text-white">
+                            #{row.rank}
+                          </span>
+                          <span className="truncate font-semibold text-white">
+                            {row.rep_name}
+                            {isMe ? " • You" : ""}
+                          </span>
                         </div>
-
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          Tier {c.school_tier} • {c.status} • {c.cadence_status}
-                          {c.cadence_step > 0 ? ` • Step ${c.cadence_step}` : ""}
-                        </div>
-
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {daysSince(c.last_activity_at)}
-                        </div>
-
-                        <div className="mt-2 text-[11px] text-muted-foreground">
-                          RL {c.response_likelihood_score} • Cadence {c.cadence_score} • Recency {c.recency_score} • Tier {c.school_tier_score} • History {c.conversion_history_score}
+                        <div className="mt-1 text-xs text-slate-300">
+                          Sales {row.metric_sales} • Meetings {row.metric_meetings} • Revenue{" "}
+                          {currency(row.metric_revenue)}
                         </div>
                       </div>
-
-                      <div className="shrink-0 rounded-full border px-3 py-1 text-sm font-semibold">
-                        {c.score}
+                      <div className="shrink-0 text-sm font-semibold text-white">
+                        {metricValue}
                       </div>
                     </div>
                   </Link>
-                ))
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                );
+              })
+            )}
+          </div>
+        </SectionCard>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <div className="text-lg font-semibold">Rep Leaderboard</div>
-              <Badge className="rounded-xl">{repLeaderboard.length}</Badge>
+      <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
+        <SectionCard title="Execution Health">
+          <div className="grid gap-3 md:grid-cols-2">
+            <MiniStat label="Overdue Work" value={overdueCount} tone="orange" />
+            <MiniStat label="Due Today" value={dueTodayCount} tone="sky" />
+            <MiniStat label="Urgent Contacts" value={urgentContactsCount} tone="violet" />
+            <MiniStat label="No Touch 7+ Days" value={staleContactsCount} tone="slate" />
+            <MiniStat label="Cadence Inactive" value={cadencePipeline?.inactive ?? 0} tone="slate" />
+            <MiniStat label="Cadence Step 3+" value={cadencePipeline?.step3plus ?? 0} tone="emerald" />
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link href="/work-queue" className="crm-button inline-block px-4 py-2">
+              Open Execution Queue
+            </Link>
+            <Link href="/contacts" className="crm-button inline-block px-4 py-2">
+              Open Contacts
+            </Link>
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Pipeline Funnel">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <MiniStat
+              label="Prospecting"
+              value={opportunitySummary?.conversions?.prospecting_count ?? 0}
+              tone="slate"
+            />
+            <MiniStat
+              label="Discovery"
+              value={opportunitySummary?.conversions?.discovery_count ?? 0}
+              tone="sky"
+            />
+            <MiniStat
+              label="Presentation"
+              value={opportunitySummary?.conversions?.presentation_count ?? 0}
+              tone="violet"
+            />
+            <MiniStat
+              label="Contract Signed"
+              value={opportunitySummary?.conversions?.contract_signed_count ?? 0}
+              tone="emerald"
+            />
+            <MiniStat
+              label="Closed Revenue"
+              value={currency(opportunitySummary?.month?.closed_actual)}
+              tone="orange"
+            />
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                Prospect → Discovery
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-slate-900">
+                {percent(opportunitySummary?.conversions?.prospecting_to_discovery)}
+              </div>
             </div>
 
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-2">Rep</th>
-                    <th className="py-2">Touches</th>
-                    <th className="py-2">Calls</th>
-                    <th className="py-2">Emails</th>
-                    <th className="py-2">Meetings</th>
-                    <th className="py-2">Tasks Closed</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {repLeaderboard.length === 0 ? (
-                    <tr>
-                      <td className="py-3 text-muted-foreground" colSpan={6}>
-                        No rep activity found.
-                      </td>
-                    </tr>
-                  ) : (
-                    repLeaderboard.map((r) => (
-                      <tr key={r.user_id} className="border-b last:border-b-0">
-                        <td className="py-2">
-                          <Link
-                            href={`/contacts?assigned_to_user_id=${r.user_id}`}
-                            className="font-semibold hover:underline"
-                          >
-                            {r.full_name || r.email || r.user_id}
-                          </Link>
-
-                          <div className="text-xs text-muted-foreground">
-                            {r.role || ""}
-                          </div>
-                        </td>
-                        <td className="py-2">{r.touches_today}</td>
-                        <td className="py-2">{r.calls_today}</td>
-                        <td className="py-2">{r.emails_today}</td>
-                        <td className="py-2">{r.meetings_today}</td>
-                        <td className="py-2">{r.tasks_closed_today}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between">
-              <div className="text-lg font-semibold">Stale Contacts</div>
-              <Badge variant="secondary" className="rounded-xl">
-                {staleContacts.length}
-              </Badge>
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                Discovery → Presentation
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-slate-900">
+                {percent(opportunitySummary?.conversions?.discovery_to_presentation)}
+              </div>
             </div>
 
-            <div className="mt-4 space-y-3">
-              {loading ? (
-                <div className="text-sm text-muted-foreground">Loading…</div>
-              ) : staleContacts.length === 0 ? (
-                <div className="rounded-xl border bg-slate-50 p-4">
-                  <div className="text-sm font-semibold">No stale contacts</div>
-                  <div className="mt-1 text-sm text-muted-foreground">
-                    Great job — all new contacts have been touched in the last 7 days.
-                  </div>
-                </div>
-              ) : (
-                staleContacts.map((c, idx) => (
-                  <StaleContactLink
-                    key={c.id || `${c.primary_email || "stale"}-${c.last_activity_at || "none"}-${idx}`}
-                    c={c}
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                Presentation → Close
+              </div>
+              <div className="mt-2 text-2xl font-semibold text-slate-900">
+                {percent(opportunitySummary?.conversions?.presentation_to_close)}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link href="/opportunities" className="crm-button inline-block px-4 py-2">
+              Open Opportunities
+            </Link>
+          </div>
+        </SectionCard>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+        <SectionCard title="Activity Rhythm">
+          <div className="mb-4 grid gap-3 md:grid-cols-4">
+            <MiniStat label="Touches Today" value={activityKpis?.touches_today ?? 0} tone="slate" />
+            <MiniStat label="Calls Today" value={activityKpis?.calls_today ?? 0} tone="sky" />
+            <MiniStat label="Emails Today" value={activityKpis?.emails_today ?? 0} tone="violet" />
+            <MiniStat label="Avg Touch" value={fmtDuration(activityKpis?.avg_touch_seconds_today ?? 0)} tone="orange" />
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="mb-3 text-sm font-semibold text-slate-900">
+              Intraday activity pattern
+            </div>
+
+            <div className="flex items-end gap-1 overflow-x-auto">
+              {heatmap.map((h) => (
+                <div key={h.hour} className="flex min-w-[16px] flex-col items-center gap-1">
+                  <div
+                    title={`${String(h.hour).padStart(2, "0")}:00 — ${h.touches} touches`}
+                    className="w-4 rounded-sm bg-orange-500/80"
+                    style={{
+                      height: `${Math.max(10, (h.touches / maxHeat) * 88)}px`,
+                      opacity: Math.max(0.2, h.touches / maxHeat),
+                    }}
                   />
-                ))
-              )}
+                  <div className="text-[10px] text-slate-500">{h.hour}</div>
+                </div>
+              ))}
             </div>
+          </div>
+        </SectionCard>
 
-            <div className="mt-4">
-              <Link
-                href="/contacts"
-                className="rounded-xl border px-4 py-2 hover:bg-slate-50 inline-block"
-              >
-                Open Contacts Command Center
-              </Link>
+        <SectionCard
+          title="Needs Attention Now"
+          right={
+            <Badge className="rounded-xl bg-white text-slate-700 hover:bg-white">
+              {priorityContacts.length}
+            </Badge>
+          }
+        >
+          <div className="space-y-3">
+            {priorityContacts.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
+                No urgent contacts surfaced right now.
+              </div>
+            ) : (
+              priorityContacts.slice(0, 8).map((c) => <PriorityRow key={c.id} c={c} />)
+            )}
+          </div>
+
+          <div className="mt-4">
+            <Link href="/work-queue" className="crm-button inline-block px-4 py-2">
+              Open Execution Queue
+            </Link>
+          </div>
+        </SectionCard>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-3">
+        <SectionCard
+          title="Recent Wins"
+          right={
+            <Badge className="rounded-xl bg-white text-slate-700 hover:bg-white">
+              {recentWins.length}
+            </Badge>
+          }
+        >
+          <div className="space-y-3">
+            {recentWins.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
+                No recent wins yet.
+              </div>
+            ) : (
+              recentWins.slice(0, 6).map((row) => (
+                <RecentWinRowCard key={row.id} row={row} />
+              ))
+            )}
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title={me?.role === "rep" ? "My Efficiency" : "Coaching Signals"}
+        >
+          {me?.role === "rep" ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              <MiniStat label="Touches Today" value={repEfficiency.touches} tone="slate" />
+              <MiniStat label="Calls Today" value={repEfficiency.calls} tone="sky" />
+              <MiniStat label="Emails Today" value={repEfficiency.emails} tone="violet" />
+              <MiniStat label="Meetings Today" value={repEfficiency.meetings} tone="emerald" />
             </div>
-          </CardContent>
-        </Card>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              <MiniStat label="Urgent Contacts" value={urgentContactsCount} tone="orange" />
+              <MiniStat label="No Touch 7+ Days" value={staleContactsCount} tone="violet" />
+              <MiniStat label="Open Opportunities" value={opportunitySummary?.sales_velocity?.open_opportunities ?? 0} tone="sky" />
+              <MiniStat label="Close Rate" value={percent(opportunitySummary?.sales_velocity?.close_rate)} tone="emerald" />
+            </div>
+          )}
+
+          <div className="mt-4 text-sm text-slate-600">
+            {me?.role === "rep"
+              ? "Use this to stay consistent on daily execution."
+              : "Use this to spot coaching needs and execution gaps early."}
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title={me?.role === "rep" ? "Stale Contacts" : "Risk Contacts"}
+          right={
+            <Badge variant="secondary" className="rounded-xl">
+              {staleContacts.length}
+            </Badge>
+          }
+        >
+          <div className="space-y-3">
+            {staleContacts.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="text-sm font-semibold text-slate-900">
+                  No stale contacts
+                </div>
+                <div className="mt-1 text-sm text-slate-500">
+                  Great job — nothing is sitting untouched for 7+ days.
+                </div>
+              </div>
+            ) : (
+              staleContacts.slice(0, 6).map((c, idx) => (
+                <StaleContactRowCard
+                  key={c.id || `${c.primary_email || "stale"}-${idx}`}
+                  c={c}
+                />
+              ))
+            )}
+          </div>
+        </SectionCard>
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <Link
-          href="/tasks"
-          className="rounded-xl border px-4 py-2 hover:bg-slate-50"
-        >
-          View all tasks
+        <Link href="/work" className="crm-button px-4 py-2">
+          Open Work Queue
         </Link>
-        <Link
-          href="/contacts"
-          className="rounded-xl border px-4 py-2 hover:bg-slate-50"
-        >
-          Search contacts
+        <Link href="/work-queue" className="crm-button px-4 py-2">
+          Open Execution Queue
+        </Link>
+        <Link href="/contacts" className="crm-button px-4 py-2">
+          Search Contacts
+        </Link>
+        <Link href="/opportunities" className="crm-button px-4 py-2">
+          Open Opportunities
+        </Link>
+        <Link href="/leaderboard" className="crm-button px-4 py-2">
+          Open Leaderboard
         </Link>
       </div>
     </div>

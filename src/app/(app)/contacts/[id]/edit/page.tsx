@@ -12,6 +12,11 @@ type Contact = {
   primary_email: string | null;
   job_title_raw: string | null;
   phone: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  website: string | null;
   sport: string;
   division: string | null;
   conference: string | null;
@@ -50,6 +55,11 @@ export default function EditContactPage() {
   const [email, setEmail] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [stateValue, setStateValue] = useState("");
+  const [zip, setZip] = useState("");
+  const [website, setWebsite] = useState("");
   const [sport, setSport] = useState("");
   const [division, setDivision] = useState("");
   const [conference, setConference] = useState("");
@@ -86,6 +96,11 @@ export default function EditContactPage() {
           primary_email,
           job_title_raw,
           phone,
+          address,
+          city,
+          state,
+          zip,
+          website,
           sport,
           division,
           conference,
@@ -118,6 +133,11 @@ export default function EditContactPage() {
       setEmail(c.primary_email ?? "");
       setJobTitle(c.job_title_raw ?? "");
       setPhone(c.phone ?? "");
+      setAddress(c.address ?? "");
+      setCity(c.city ?? "");
+      setStateValue(c.state ?? "");
+      setZip(c.zip ?? "");
+      setWebsite(c.website ?? "");
       setSport(c.sport ?? "");
       setDivision(c.division ?? "");
       setConference(c.conference ?? "");
@@ -149,6 +169,11 @@ export default function EditContactPage() {
         primary_email: email,
         job_title_raw: jobTitle,
         phone,
+        address,
+        city,
+        state: stateValue,
+        zip,
+        website,
         sport,
         division,
         conference,
@@ -243,6 +268,41 @@ export default function EditContactPage() {
             value={jobTitle}
             onChange={(e) => setJobTitle(e.target.value)}
           />
+
+          <input
+            className="w-full rounded-xl border px-3 py-2"
+            placeholder="Street address"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+          />
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <input
+              className="rounded-xl border px-3 py-2"
+              placeholder="City"
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+            />
+            <input
+              className="rounded-xl border px-3 py-2"
+              placeholder="State"
+              value={stateValue}
+              onChange={(e) => setStateValue(e.target.value)}
+            />
+            <input
+              className="rounded-xl border px-3 py-2"
+              placeholder="Zip"
+              value={zip}
+              onChange={(e) => setZip(e.target.value)}
+            />
+          </div>
+
+          <input
+            className="w-full rounded-xl border px-3 py-2"
+            placeholder="Website"
+            value={website}
+            onChange={(e) => setWebsite(e.target.value)}
+          />
         </div>
 
         <div className="rounded-2xl border p-5 space-y-4">
@@ -326,11 +386,7 @@ export default function EditContactPage() {
       </div>
 
       <div className="flex gap-2">
-        <button
-          className="rounded-xl border px-5 py-3"
-          disabled={busy}
-          onClick={save}
-        >
+        <button className="rounded-xl border px-5 py-3" disabled={busy} onClick={save}>
           {busy ? "Saving..." : "Save Changes"}
         </button>
 

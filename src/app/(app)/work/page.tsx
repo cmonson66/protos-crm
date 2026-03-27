@@ -7,10 +7,10 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { supabase } from "@/lib/supabaseClient";
 
 import PageHeader from "@/components/PageHeader";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
-type Vertical = "coaching" | "corporate";
+type Vertical = "athletics" | "corporate";
 
 type TaskRow = {
   id: string;
@@ -142,6 +142,10 @@ type QueueReason = {
   detail: string;
 };
 
+const BTN = "crm-button rounded-xl px-4 py-2 text-sm";
+const BTN_PRIMARY = "crm-button-primary rounded-xl px-4 py-2 text-sm";
+const PILL = "crm-pill inline-flex items-center rounded-full px-3 py-1 text-xs font-medium";
+
 function fmtName(fn?: string | null, ln?: string | null) {
   const n = `${fn ?? ""} ${ln ?? ""}`.trim();
   return n || "(No name)";
@@ -157,35 +161,35 @@ function fmtMMSS(totalSeconds: number) {
 function momentumStyles(label?: RadarContact["momentum_label"]) {
   switch (label) {
     case "Rising":
-      return "bg-emerald-50 text-emerald-700 border-emerald-200";
+      return `${PILL} border-emerald-200 bg-emerald-50 text-emerald-700`;
     case "Warm":
-      return "bg-amber-50 text-amber-700 border-amber-200";
+      return `${PILL} border-amber-200 bg-amber-50 text-amber-700`;
     case "Cooling":
-      return "bg-sky-50 text-sky-700 border-sky-200";
+      return `${PILL} border-sky-200 bg-sky-50 text-sky-700`;
     case "Cold":
-      return "bg-slate-50 text-slate-700 border-slate-200";
+      return `${PILL} border-slate-200 bg-slate-50 text-slate-700`;
     default:
-      return "bg-slate-50 text-slate-700 border-slate-200";
+      return `${PILL} border-slate-200 bg-slate-50 text-slate-700`;
   }
 }
 
 function verticalStyles(vertical?: Vertical) {
   return vertical === "corporate"
-    ? "bg-violet-50 text-violet-700 border-violet-200"
-    : "bg-sky-50 text-sky-700 border-sky-200";
+    ? `${PILL} border-violet-200 bg-violet-50 text-violet-700`
+    : `${PILL} border-orange-200 bg-orange-50 text-orange-700`;
 }
 
 function queueReasonTone(reasonType: QueueReason["type"]) {
   switch (reasonType) {
     case "radar_promotion":
-      return "border-violet-200 bg-violet-50 text-violet-700";
+      return `${PILL} border-violet-200 bg-violet-50 text-violet-700`;
     case "cadence":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+      return `${PILL} border-emerald-200 bg-emerald-50 text-emerald-700`;
     case "manual_follow_up":
-      return "border-amber-200 bg-amber-50 text-amber-700";
+      return `${PILL} border-amber-200 bg-amber-50 text-amber-700`;
     case "task_due":
     default:
-      return "border-slate-200 bg-slate-50 text-slate-700";
+      return `${PILL} border-slate-200 bg-slate-50 text-slate-700`;
   }
 }
 
@@ -251,8 +255,59 @@ function deriveQueueReason(task: TaskRow | null): QueueReason | null {
   return {
     type: "task_due",
     label: "Due Task",
-    detail: "This item is at the front because it is the earliest open due task.",
+    detail: "This item is at the front because it is the highest-ranked actionable queue item.",
   };
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString();
+}
+
+function MetricCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <Card className="crm-card rounded-3xl border-0 shadow-none">
+      <CardContent className="p-5">
+        <div className="text-sm text-muted-foreground">{label}</div>
+        <div className="mt-2 text-3xl font-semibold tracking-tight">{value}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SectionCard({
+  title,
+  subtitle,
+  right,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  right?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <Card className="crm-card rounded-3xl border-0 shadow-none">
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-lg font-semibold">{title}</div>
+            {subtitle ? <div className="mt-1 text-sm text-muted-foreground">{subtitle}</div> : null}
+          </div>
+          {right}
+        </div>
+        <div className="mt-4">{children}</div>
+      </CardContent>
+    </Card>
+  );
 }
 
 export default function WorkPage() {
@@ -315,27 +370,19 @@ export default function WorkPage() {
     return active ? [active, ...rest] : radar;
   }, [radar, activeContactId]);
 
-  async function fetchTaskById(taskId: string) {
-    const res = await fetchWithAuth(`/api/tasks/by-id?task_id=${encodeURIComponent(taskId)}`);
+  async function fetchQueueItem(params?: { taskId?: string; excludeTaskId?: string }) {
+    const qs = new URLSearchParams();
+
+    if (params?.taskId) qs.set("task_id", params.taskId);
+    if (params?.excludeTaskId) qs.set("exclude_task_id", params.excludeTaskId);
+
+    const res = await fetchWithAuth(
+      `/api/work-queue/next${qs.toString() ? `?${qs.toString()}` : ""}`
+    );
     const json = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      throw new Error(json?.error ?? "Failed to load task by id");
-    }
-
-    return (json?.data ?? null) as TaskRow | null;
-  }
-
-  async function fetchNext(excludeTaskId?: string) {
-    const qs = excludeTaskId
-      ? `?exclude_task_id=${encodeURIComponent(excludeTaskId)}`
-      : "";
-
-    const res = await fetchWithAuth(`/api/tasks/next${qs}`);
-    const json = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      throw new Error(json?.error ?? "Failed to load next task");
+      throw new Error(json?.error ?? "Failed to load queue item");
     }
 
     return (json?.data ?? null) as TaskRow | null;
@@ -424,18 +471,18 @@ export default function WorkPage() {
       let first: TaskRow | null = null;
 
       if (forcedTaskId) {
-        first = await fetchTaskById(forcedTaskId);
+        first = await fetchQueueItem({ taskId: forcedTaskId });
       }
 
       if (!first) {
-        first = await fetchNext();
+        first = await fetchQueueItem();
       }
 
       setCurrent(first);
       setNext(null);
 
       if (first?.id) {
-        const second = await fetchNext(first.id);
+        const second = await fetchQueueItem({ excludeTaskId: first.id });
         setNext(second);
       }
 
@@ -457,7 +504,7 @@ export default function WorkPage() {
     setErr(null);
 
     try {
-      const res = await fetchWithAuth("/api/tasks/promote-contact", {
+      const res = await fetchWithAuth("/api/work-queue/promote", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ contact_id: contactId }),
@@ -539,7 +586,7 @@ export default function WorkPage() {
 
     if (nextTask?.id) {
       try {
-        const preload = await fetchNext(nextTask.id);
+        const preload = await fetchQueueItem({ excludeTaskId: nextTask.id });
         setNext(preload);
       } catch {
         setNext(null);
@@ -675,120 +722,69 @@ export default function WorkPage() {
           subtitle={err ? err : "Queue empty. Nice work."}
           actions={
             <div className="flex items-center gap-2">
-              <Button variant="outline" className="rounded-xl" asChild>
-                <Link href="/accounts">Accounts Radar</Link>
-              </Button>
-
-              <Button variant="outline" className="rounded-xl" asChild>
-                <Link href="/contacts">Contacts</Link>
-              </Button>
-
-              <Button className="rounded-xl" onClick={() => void loadInitial()}>
+              <Link href="/accounts" className={BTN}>Accounts Radar</Link>
+              <Link href="/contacts" className={BTN}>Contacts</Link>
+              <Button className={BTN_PRIMARY} onClick={() => void loadInitial()}>
                 Refresh
               </Button>
             </div>
           }
         />
 
-        <Card className="rounded-2xl">
-          <CardContent className="p-8 text-center text-muted-foreground">
-            No open tasks right now.
-          </CardContent>
-        </Card>
+        <SectionCard title="Priority Radar Board" subtitle="Top 20 athletics + corporate contacts by priority score.">
+          {radarLoading ? (
+            <div className="text-sm text-muted-foreground">Loading radar…</div>
+          ) : radarDisplay.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No ranked contact available.</div>
+          ) : (
+            <div className="space-y-3">
+              {radarDisplay.map((item, idx) => {
+                const name = fmtName(item.first_name, item.last_name);
+                const title = item.org_name ? `${item.org_name} — ${name}` : name;
 
-        <Card className="rounded-2xl">
-          <CardContent className="space-y-4 p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-lg font-semibold">Priority Radar Board</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Top 20 coaching + corporate contacts by priority score.
-                </div>
-              </div>
-
-              <Button variant="outline" className="rounded-xl" onClick={() => void fetchRadar()}>
-                Refresh Radar
-              </Button>
-            </div>
-
-            {radarLoading ? (
-              <div className="text-sm text-muted-foreground">Loading radar…</div>
-            ) : radarDisplay.length === 0 ? (
-              <div className="text-sm text-muted-foreground">
-                No ranked contact available.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {radarDisplay.map((item, idx) => {
-                  const name = fmtName(item.first_name, item.last_name);
-                  const title = item.org_name ? `${item.org_name} — ${name}` : name;
-
-                  return (
-                    <div key={item.id} className="rounded-xl border p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-xs font-semibold text-muted-foreground">
-                              #{idx + 1}
-                            </span>
-                            <span
-                              className={[
-                                "inline-flex rounded-full border px-2 py-1 text-xs font-semibold",
-                                verticalStyles(item.vertical),
-                              ].join(" ")}
-                            >
-                              {item.vertical === "corporate" ? "Corporate" : "Coaching"}
-                            </span>
-                          </div>
-
-                          <div className="mt-2 truncate text-sm font-semibold">{title}</div>
-
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {item.status || "—"} • {item.cadence_status || "—"} •{" "}
-                            {daysSince(item.last_activity_at)}
-                          </div>
-
-                          <div className="mt-2 text-xs text-muted-foreground">
-                            {item.priority_reason || "Priority-ranked contact"}
-                          </div>
+                return (
+                  <div key={item.id} className="crm-card-soft rounded-2xl border-0 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-semibold text-muted-foreground">#{idx + 1}</span>
+                          <span className={verticalStyles(item.vertical)}>
+                            {item.vertical === "corporate" ? "Corporate" : "Athletics"}
+                          </span>
+                          <span className={momentumStyles(item.momentum_label)}>{item.momentum_label}</span>
                         </div>
 
-                        <div className="shrink-0 text-right">
-                          <div className="rounded-lg border px-3 py-1 text-sm font-semibold">
-                            {item.priority_score}
-                          </div>
-                          <div
-                            className={[
-                              "mt-2 inline-flex rounded-full border px-2 py-1 text-xs font-semibold",
-                              momentumStyles(item.momentum_label),
-                            ].join(" ")}
-                          >
-                            {item.momentum_label}
-                          </div>
+                        <div className="mt-2 truncate font-semibold">{title}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {item.status || "—"} • {item.cadence_status || "—"} • {daysSince(item.last_activity_at)}
+                        </div>
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          {item.priority_reason || "Priority-ranked contact"}
                         </div>
                       </div>
 
-                      <div className="mt-3 flex gap-2">
-                        <Button
-                          className="rounded-xl"
-                          size="sm"
-                          disabled={promotingId === item.id}
-                          onClick={() => void promoteRadarContact(item.id)}
-                        >
-                          {promotingId === item.id ? "Promoting..." : "Work Now"}
-                        </Button>
-
-                        <Button variant="outline" size="sm" className="rounded-xl" asChild>
-                          <Link href={`/contacts/${item.id}`}>Open</Link>
-                        </Button>
-                      </div>
+                      <div className="crm-pill px-3 py-1 text-sm font-semibold">{item.priority_score}</div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+
+                    <div className="mt-4 flex gap-2">
+                      <Button
+                        className={BTN_PRIMARY}
+                        disabled={promotingId === item.id}
+                        onClick={() => void promoteRadarContact(item.id)}
+                      >
+                        {promotingId === item.id ? "Promoting..." : "Work Now"}
+                      </Button>
+
+                      <Link href={`/contacts/${item.id}`} className={BTN}>
+                        Open
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </SectionCard>
       </div>
     );
   }
@@ -809,15 +805,9 @@ export default function WorkPage() {
         }
         actions={
           <div className="flex items-center gap-2">
-            <Button variant="outline" className="rounded-xl" asChild>
-              <Link href="/accounts">Accounts Radar</Link>
-            </Button>
-
-            <Button variant="outline" className="rounded-xl" asChild>
-              <Link href="/contacts">Contacts</Link>
-            </Button>
-
-            <Button variant="outline" className="rounded-xl" onClick={() => void loadInitial()}>
+            <Link href="/accounts" className={BTN}>Accounts Radar</Link>
+            <Link href="/contacts" className={BTN}>Contacts</Link>
+            <Button variant="outline" className={BTN} onClick={() => void loadInitial()}>
               Refresh
             </Button>
           </div>
@@ -825,215 +815,156 @@ export default function WorkPage() {
       />
 
       {err ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
-          {err}
-        </div>
+        <div className="crm-card border-red-200 bg-red-50 p-4 text-red-700">{err}</div>
       ) : null}
+
+      <div className="grid gap-4 md:grid-cols-4">
+        <MetricCard label="Live Contact" value={fmtName(contact.first_name, contact.last_name)} />
+        <MetricCard label="Queue Source" value={queueReason?.label || "—"} />
+        <MetricCard label="Current Task Due" value={formatDateTime(current?.due_at)} />
+        <MetricCard label="Next Preloaded" value={next ? "Yes" : "No"} />
+      </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_500px]">
         <div className="space-y-6">
-          <Card className="rounded-2xl">
-            <CardContent className="space-y-3 p-5">
-              <div className="flex flex-wrap items-center gap-2">
-                <span
-                  className={[
-                    "inline-flex rounded-full border px-3 py-1 text-sm font-semibold",
-                    verticalStyles(contact.vertical),
-                  ].join(" ")}
+          <SectionCard title={contactTitle} subtitle={`${contact.job_title_raw ?? ""}${contact.job_title_raw && contact.primary_email ? " • " : ""}${contact.primary_email ?? ""}`}>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={verticalStyles(contact.vertical)}>
+                {contact.vertical === "corporate" ? "Corporate" : "Athletics"}
+              </span>
+              {current?.status ? <span className={PILL}>{current.status}</span> : null}
+            </div>
+
+            <div className="mt-3 text-sm text-muted-foreground">
+              {contact.vertical === "corporate" ? "Market / Focus" : "Sport"}: {contact.sport}
+            </div>
+
+            <div className="mt-4 flex gap-2">
+              <Link href={`/contacts/${activeContactId}`} className={BTN_PRIMARY}>
+                Open Contact
+              </Link>
+              {contact.primary_email ? (
+                <button
+                  className={BTN}
+                  onClick={() => window.open(`mailto:${contact.primary_email}`, "_blank")}
                 >
-                  {contact.vertical === "corporate" ? "Corporate" : "Coaching"}
-                </span>
-              </div>
+                  Email
+                </button>
+              ) : null}
+            </div>
+          </SectionCard>
 
-              <div className="text-2xl font-semibold">{contactTitle}</div>
-
-              <div className="text-sm text-muted-foreground">
-                {contact.job_title_raw ?? ""}
-                {contact.job_title_raw && contact.primary_email ? " • " : ""}
-                {contact.primary_email ?? ""}
-              </div>
-
-              <div className="text-sm text-muted-foreground">
-                {contact.vertical === "corporate" ? "Market / Focus" : "Sport"}: {contact.sport}
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <Button className="rounded-xl" asChild>
-                  <Link href={`/contacts/${activeContactId}`}>Open Contact</Link>
-                </Button>
-
-                {contact.primary_email ? (
-                  <Button
-                    variant="outline"
-                    className="rounded-xl"
-                    onClick={() => window.open(`mailto:${contact.primary_email}`, "_blank")}
-                  >
-                    Email
-                  </Button>
-                ) : null}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl">
-            <CardContent className="space-y-4 p-5">
-              <div className="text-lg font-semibold">Queue Reason</div>
-
-              {queueReason ? (
-                <>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={[
-                        "inline-flex rounded-full border px-3 py-1 text-sm font-semibold",
-                        queueReasonTone(queueReason.type),
-                      ].join(" ")}
-                    >
-                      {queueReason.label}
+          <SectionCard title="Queue Reason">
+            {queueReason ? (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={queueReasonTone(queueReason.type)}>{queueReason.label}</span>
+                  {current?.due_at ? (
+                    <span className="text-sm text-muted-foreground">
+                      Due: {new Date(current.due_at).toLocaleString()}
                     </span>
-
-                    {current?.due_at ? (
-                      <span className="text-sm text-muted-foreground">
-                        Due: {new Date(current.due_at).toLocaleString()}
-                      </span>
-                    ) : null}
-                  </div>
-
-                  <div className="text-sm text-muted-foreground">{queueReason.detail}</div>
-
-                  {current?.notes ? (
-                    <div className="rounded-xl border bg-slate-50 p-3 text-sm text-slate-700">
-                      {current.notes}
-                    </div>
                   ) : null}
-                </>
-              ) : (
-                <div className="text-sm text-muted-foreground">
-                  No queue reason available.
                 </div>
-              )}
-            </CardContent>
-          </Card>
 
-          <Card className="rounded-2xl">
-            <CardContent className="space-y-2 p-5">
-              <div className="text-lg font-semibold">Current Task</div>
+                <div className="mt-3 text-sm text-muted-foreground">{queueReason.detail}</div>
 
-              <div className="text-sm">
-                <b>{current.title?.trim() || "(no title)"}</b>
-              </div>
-
-              <div className="text-sm text-muted-foreground">
-                Type: {current.task_type} • Due:{" "}
-                {current.due_at ? new Date(current.due_at).toLocaleString() : "—"}
-              </div>
-
-              <div className="text-xs text-muted-foreground">
-                Preloaded next: {next ? "Yes" : "No"}
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="flex flex-wrap gap-2">
-            <Button className="rounded-xl" disabled={acting} onClick={() => void completeAndNext()}>
-              Complete + Next (C)
-            </Button>
-
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              disabled={acting}
-              onClick={() => void snoozeAndNext(60)}
-            >
-              Snooze 1h (S)
-            </Button>
-
-            <Button
-              variant="outline"
-              className="rounded-xl"
-              disabled={acting}
-              onClick={() => void skipToNext()}
-            >
-              Next (N)
-            </Button>
-          </div>
-
-          <Card className="rounded-2xl">
-            <CardContent className="space-y-4 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-lg font-semibold">Current Contact Intelligence</div>
-                <Button
-                  variant="outline"
-                  className="rounded-xl"
-                  onClick={() => void refreshIntelligence(activeContactId)}
-                >
-                  Refresh Intel
-                </Button>
-              </div>
-
-              {detailsLoading ? (
-                <div className="text-sm text-muted-foreground">Loading intelligence…</div>
-              ) : currentDetails ? (
-                <>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="rounded-xl border px-3 py-2">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Priority
-                      </div>
-                      <div className="mt-1 text-2xl font-semibold">
-                        {currentDetails.contact.priority_score}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border px-3 py-2 text-sm">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Status
-                      </div>
-                      <div className="mt-1 font-medium">
-                        {currentDetails.contact.status}
-                        {currentDetails.contact.cadence_status
-                          ? ` • ${currentDetails.contact.cadence_status}`
-                          : ""}
-                        {currentDetails.contact.cadence_step
-                          ? ` • Step ${currentDetails.contact.cadence_step}`
-                          : ""}
-                      </div>
-                    </div>
+                {current?.notes ? (
+                  <div className="crm-card-soft mt-4 rounded-2xl border-0 p-4 text-sm">
+                    {current.notes}
                   </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="text-sm text-muted-foreground">No queue reason available.</div>
+            )}
+          </SectionCard>
 
-                  <div className="space-y-2">
+          <SectionCard title="Current Task">
+            <div className="text-sm font-semibold">{current.title?.trim() || "(no title)"}</div>
+            <div className="mt-2 text-sm text-muted-foreground">
+              Type: {current.task_type} • Due:{" "}
+              {current.due_at ? new Date(current.due_at).toLocaleString() : "—"}
+            </div>
+            <div className="mt-2 text-xs text-muted-foreground">
+              Preloaded next: {next ? "Yes" : "No"}
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button className={BTN_PRIMARY} disabled={acting} onClick={() => void completeAndNext()}>
+                Complete + Next (C)
+              </Button>
+
+              <Button className={BTN} disabled={acting} onClick={() => void snoozeAndNext(60)}>
+                Snooze 1h (S)
+              </Button>
+
+              <Button className={BTN} disabled={acting} onClick={() => void skipToNext()}>
+                Next (N)
+              </Button>
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Current Contact Intelligence"
+            right={
+              <Button className={BTN} onClick={() => void refreshIntelligence(activeContactId)}>
+                Refresh Intel
+              </Button>
+            }
+          >
+            {detailsLoading ? (
+              <div className="text-sm text-muted-foreground">Loading intelligence…</div>
+            ) : currentDetails ? (
+              <div className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <MetricCard label="Priority" value={currentDetails.contact.priority_score} />
+                  <MetricCard
+                    label="Status"
+                    value={`${currentDetails.contact.status}${currentDetails.contact.cadence_status ? ` • ${currentDetails.contact.cadence_status}` : ""}${currentDetails.contact.cadence_step ? ` • Step ${currentDetails.contact.cadence_step}` : ""}`}
+                  />
+                </div>
+
+                <Card className="crm-card-soft rounded-3xl border-0 shadow-none">
+                  <CardContent className="p-5">
                     <div className="text-sm font-semibold">Why this contact is in motion</div>
-                    {currentTopReasons.length > 0 ? (
-                      currentTopReasons.map((item, idx) => (
-                        <div
-                          key={`${item.label}-${idx}`}
-                          className="flex items-center justify-between gap-3 rounded-xl border p-3 text-sm"
-                        >
-                          <div>{item.label}</div>
-                          <div className="font-semibold">
-                            {item.points >= 0 ? `+${item.points}` : item.points}
+                    <div className="mt-3 space-y-3">
+                      {currentTopReasons.length > 0 ? (
+                        currentTopReasons.map((item, idx) => (
+                          <div
+                            key={`${item.label}-${idx}`}
+                            className="crm-card-soft flex items-center justify-between rounded-2xl border-0 p-3 text-sm"
+                          >
+                            <div>{item.label}</div>
+                            <div className="font-semibold">
+                              {item.points >= 0 ? `+${item.points}` : item.points}
+                            </div>
                           </div>
+                        ))
+                      ) : (
+                        <div className="text-sm text-muted-foreground">
+                          No priority breakdown available.
                         </div>
-                      ))
-                    ) : (
-                      <div className="text-sm text-muted-foreground">
-                        No priority breakdown available.
-                      </div>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
 
-                  {currentDetails.nextBestAction ? (
-                    <div className="rounded-xl border p-4">
+                {currentDetails.nextBestAction ? (
+                  <Card className="crm-card-soft rounded-3xl border-0 shadow-none">
+                    <CardContent className="p-5">
                       <div className="text-xs uppercase tracking-wide text-muted-foreground">
                         Next Best Action
                       </div>
                       <div className="mt-2 text-sm font-medium">
                         {currentDetails.nextBestAction.label}
                       </div>
-                    </div>
-                  ) : null}
+                    </CardContent>
+                  </Card>
+                ) : null}
 
-                  {currentDetails.cadencePreview ? (
-                    <div className="rounded-xl border p-4">
+                {currentDetails.cadencePreview ? (
+                  <Card className="crm-card-soft rounded-3xl border-0 shadow-none">
+                    <CardContent className="p-5">
                       <div className="text-xs uppercase tracking-wide text-muted-foreground">
                         Cadence Preview
                       </div>
@@ -1041,244 +972,173 @@ export default function WorkPage() {
                         {currentDetails.cadencePreview.cadence_key} • Step{" "}
                         {currentDetails.cadencePreview.step}
                       </div>
-                      <div className="mt-2 text-sm text-slate-700">
+                      <div className="mt-2 text-sm">
                         {currentDetails.cadencePreview.subject || "No subject"}
                       </div>
-                    </div>
-                  ) : null}
-                </>
-              ) : (
-                <div className="text-sm text-muted-foreground">
-                  No intelligence available for this contact.
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                    </CardContent>
+                  </Card>
+                ) : null}
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">
+                No intelligence available for this contact.
+              </div>
+            )}
+          </SectionCard>
         </div>
 
         <div className="space-y-6">
-          <Card className="rounded-2xl">
-            <CardContent className="space-y-4 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-lg font-semibold">Manager-Grade Productivity</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Last {analytics?.window_days ?? 30} days.
-                  </div>
+          <SectionCard
+            title="Manager-Grade Productivity"
+            subtitle={`Last ${analytics?.window_days ?? 30} days.`}
+            right={
+              <Button className={BTN} onClick={() => void fetchAnalytics()}>
+                Refresh Analytics
+              </Button>
+            }
+          >
+            {analyticsLoading ? (
+              <div className="text-sm text-muted-foreground">Loading analytics…</div>
+            ) : !analytics ? (
+              <div className="text-sm text-muted-foreground">Analytics unavailable.</div>
+            ) : (
+              <>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <MetricCard label="Completed Today" value={analytics.completed_today} />
+                  <MetricCard label="Avg Touch Time" value={fmtMMSS(analytics.avg_touch_seconds)} />
+                  <MetricCard
+                    label="Promoted Contacts Completed"
+                    value={analytics.promoted_contacts_completed}
+                  />
+                  <MetricCard
+                    label="Cadence Completion Rate"
+                    value={`${analytics.cadence_completion_rate}%`}
+                  />
+                  <MetricCard label="Snooze Rate" value={`${analytics.snooze_rate}%`} />
+                  <MetricCard
+                    label="Touch Completions Logged"
+                    value={analytics.complete_touch_count}
+                  />
                 </div>
 
-                <Button variant="outline" className="rounded-xl" onClick={() => void fetchAnalytics()}>
-                  Refresh Analytics
-                </Button>
-              </div>
-
-              {analyticsLoading ? (
-                <div className="text-sm text-muted-foreground">Loading analytics…</div>
-              ) : !analytics ? (
-                <div className="text-sm text-muted-foreground">Analytics unavailable.</div>
-              ) : (
-                <>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="rounded-xl border p-4">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Completed Today
-                      </div>
-                      <div className="mt-2 text-2xl font-semibold">{analytics.completed_today}</div>
-                    </div>
-
-                    <div className="rounded-xl border p-4">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Avg Touch Time
-                      </div>
-                      <div className="mt-2 text-2xl font-semibold">
-                        {fmtMMSS(analytics.avg_touch_seconds)}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border p-4">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Promoted Contacts Completed
-                      </div>
-                      <div className="mt-2 text-2xl font-semibold">
-                        {analytics.promoted_contacts_completed}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border p-4">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Cadence Completion Rate
-                      </div>
-                      <div className="mt-2 text-2xl font-semibold">
-                        {analytics.cadence_completion_rate}%
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border p-4">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Snooze Rate
-                      </div>
-                      <div className="mt-2 text-2xl font-semibold">{analytics.snooze_rate}%</div>
-                    </div>
-
-                    <div className="rounded-xl border p-4">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                        Touch Completions Logged
-                      </div>
-                      <div className="mt-2 text-2xl font-semibold">
-                        {analytics.complete_touch_count}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3">
-                    {analytics.sources.map((source) => {
-                      const pct =
-                        analytics.total_completed > 0
-                          ? Math.round((source.count / analytics.total_completed) * 100)
-                          : 0;
-
-                      return (
-                        <div
-                          key={source.key}
-                          className={`rounded-xl border p-4 ${analyticsTone(source.key)}`}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="text-sm font-semibold">{source.label}</div>
-                            <div className="text-sm font-semibold">{source.count}</div>
-                          </div>
-
-                          <div className="mt-2 text-xs text-muted-foreground">
-                            {pct}% of completed work
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-2xl">
-            <CardContent className="space-y-4 p-5">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-lg font-semibold">Priority Radar Board</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Top 20 coaching + corporate contacts by priority score.
-                  </div>
-                </div>
-
-                <Button variant="outline" className="rounded-xl" onClick={() => void fetchRadar()}>
-                  Refresh Radar
-                </Button>
-              </div>
-
-              {radarLoading ? (
-                <div className="text-sm text-muted-foreground">Loading radar…</div>
-              ) : radarDisplay.length === 0 ? (
-                <div className="text-sm text-muted-foreground">
-                  No ranked contact available.
-                </div>
-              ) : (
-                <div className="max-h-[900px] space-y-3 overflow-auto pr-1">
-                  {radarDisplay.map((item, idx) => {
-                    const name = fmtName(item.first_name, item.last_name);
-                    const title = item.org_name ? `${item.org_name} — ${name}` : name;
-                    const isCurrent = item.id === activeContactId;
+                <div className="mt-4 grid gap-3">
+                  {analytics.sources.map((source) => {
+                    const pct =
+                      analytics.total_completed > 0
+                        ? Math.round((source.count / analytics.total_completed) * 100)
+                        : 0;
 
                     return (
                       <div
-                        key={item.id}
-                        className={[
-                          "rounded-xl border p-3 transition-colors",
-                          isCurrent ? "border-emerald-300 bg-emerald-50/60" : "",
-                        ].join(" ")}
+                        key={source.key}
+                        className={`rounded-2xl border p-4 ${analyticsTone(source.key)}`}
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-xs font-semibold text-muted-foreground">
-                                #{idx + 1}
-                              </span>
-
-                              <span
-                                className={[
-                                  "inline-flex rounded-full border px-2 py-1 text-xs font-semibold",
-                                  verticalStyles(item.vertical),
-                                ].join(" ")}
-                              >
-                                {item.vertical === "corporate" ? "Corporate" : "Coaching"}
-                              </span>
-
-                              {isCurrent ? (
-                                <span className="inline-flex rounded-full border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-emerald-700">
-                                  Live Queue Contact
-                                </span>
-                              ) : null}
-                            </div>
-
-                            <div className="mt-2 truncate text-sm font-semibold">{title}</div>
-
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {item.status || "—"} • {item.cadence_status || "—"}
-                              {item.cadence_step > 0 ? ` • Step ${item.cadence_step}` : ""}
-                            </div>
-
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {item.vertical === "corporate"
-                                ? `Focus: ${item.sport || "—"}`
-                                : `Sport: ${item.sport || "—"}`}
-                              {" • "}
-                              {daysSince(item.last_activity_at)}
-                            </div>
-
-                            <div className="mt-2 line-clamp-2 text-xs text-muted-foreground">
-                              {item.priority_reason || "Priority-ranked contact"}
-                            </div>
-                          </div>
-
-                          <div className="shrink-0 text-right">
-                            <div className="rounded-lg border px-3 py-1 text-sm font-semibold">
-                              {item.priority_score}
-                            </div>
-
-                            <div
-                              className={[
-                                "mt-2 inline-flex rounded-full border px-2 py-1 text-xs font-semibold",
-                                momentumStyles(item.momentum_label),
-                              ].join(" ")}
-                            >
-                              {item.momentum_label}
-                            </div>
-                          </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-semibold">{source.label}</div>
+                          <div className="text-sm font-semibold">{source.count}</div>
                         </div>
-
-                        <div className="mt-3 flex gap-2">
-                          <Button
-                            className="rounded-xl"
-                            size="sm"
-                            disabled={promotingId === item.id || isCurrent}
-                            onClick={() => void promoteRadarContact(item.id)}
-                          >
-                            {isCurrent
-                              ? "Working Now"
-                              : promotingId === item.id
-                                ? "Promoting..."
-                                : "Work Now"}
-                          </Button>
-
-                          <Button variant="outline" size="sm" className="rounded-xl" asChild>
-                            <Link href={`/contacts/${item.id}`}>Open</Link>
-                          </Button>
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          {pct}% of completed work
                         </div>
                       </div>
                     );
                   })}
                 </div>
-              )}
-            </CardContent>
-          </Card>
+              </>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="Priority Radar Board"
+            subtitle="Top 20 athletics + corporate contacts by priority score."
+            right={
+              <Button className={BTN} onClick={() => void fetchRadar()}>
+                Refresh Radar
+              </Button>
+            }
+          >
+            {radarLoading ? (
+              <div className="text-sm text-muted-foreground">Loading radar…</div>
+            ) : radarDisplay.length === 0 ? (
+              <div className="text-sm text-muted-foreground">No ranked contact available.</div>
+            ) : (
+              <div className="max-h-[900px] space-y-3 overflow-auto pr-1">
+                {radarDisplay.map((item, idx) => {
+                  const name = fmtName(item.first_name, item.last_name);
+                  const title = item.org_name ? `${item.org_name} — ${name}` : name;
+                  const isCurrent = item.id === activeContactId;
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={[
+                        "crm-card-soft rounded-2xl border-0 p-4 transition",
+                        isCurrent ? "ring-2 ring-emerald-300" : "",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-semibold text-muted-foreground">
+                              #{idx + 1}
+                            </span>
+                            <span className={verticalStyles(item.vertical)}>
+                              {item.vertical === "corporate" ? "Corporate" : "Athletics"}
+                            </span>
+                            <span className={momentumStyles(item.momentum_label)}>
+                              {item.momentum_label}
+                            </span>
+                            {isCurrent ? <span className={PILL}>Live Queue Contact</span> : null}
+                          </div>
+
+                          <div className="mt-2 truncate font-semibold">{title}</div>
+
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {item.status || "—"} • {item.cadence_status || "—"}
+                            {item.cadence_step > 0 ? ` • Step ${item.cadence_step}` : ""}
+                          </div>
+
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {item.vertical === "corporate"
+                              ? `Focus: ${item.sport || "—"}`
+                              : `Sport: ${item.sport || "—"}`}
+                            {" • "}
+                            {daysSince(item.last_activity_at)}
+                          </div>
+
+                          <div className="mt-2 line-clamp-2 text-xs text-muted-foreground">
+                            {item.priority_reason || "Priority-ranked contact"}
+                          </div>
+                        </div>
+
+                        <div className="crm-pill px-3 py-1 text-sm font-semibold">
+                          {item.priority_score}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex gap-2">
+                        <Button
+                          className={BTN_PRIMARY}
+                          disabled={promotingId === item.id || isCurrent}
+                          onClick={() => void promoteRadarContact(item.id)}
+                        >
+                          {isCurrent
+                            ? "Working Now"
+                            : promotingId === item.id
+                              ? "Promoting..."
+                              : "Work Now"}
+                        </Button>
+
+                        <Link href={`/contacts/${item.id}`} className={BTN}>
+                          Open
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </SectionCard>
         </div>
       </div>
     </div>

@@ -1,22 +1,18 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { scoreContact } from "@/lib/priorityEngine";
 
 export const runtime = "nodejs";
 
-type Vertical = "coaching" | "corporate";
+type Vertical = "athletics" | "corporate";
 
 function normalizeVertical(value: unknown): Vertical {
-  return value === "corporate" ? "corporate" : "coaching";
+  return value === "corporate" ? "corporate" : "athletics";
 }
 
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
-    const limit = Math.min(
-      50,
-      Math.max(1, Number(url.searchParams.get("limit") || 20))
-    );
+    const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit") || 20)));
 
     const authHeader = req.headers.get("authorization") || "";
     const token = authHeader.startsWith("Bearer ")
@@ -58,69 +54,81 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "User inactive" }, { status: 403 });
     }
 
-    const isPrivileged =
-      !!meProfile?.is_admin ||
-      meProfile?.role === "admin" ||
-      meProfile?.role === "manager";
+    const role =
+      !!meProfile?.is_admin || meProfile?.role === "admin"
+        ? "admin"
+        : meProfile?.role === "manager"
+          ? "manager"
+          : "rep";
 
-    const { data: cpsData, error: cpsErr } = await supabase.rpc("contact_priority_scores");
+    let visibleUserIds = [userId];
 
-    if (cpsErr) {
-      return NextResponse.json({ error: cpsErr.message }, { status: 400 });
+    if (role === "manager") {
+      const { data: scopedUsers, error: scopeErr } = await supabase
+        .from("user_profiles")
+        .select("user_id")
+        .eq("is_active", true)
+        .eq("manager_user_id", userId);
+
+      if (scopeErr) {
+        return NextResponse.json({ error: scopeErr.message }, { status: 400 });
+      }
+
+      visibleUserIds = Array.from(
+        new Set([userId, ...(scopedUsers ?? []).map((r) => String(r.user_id))])
+      );
+    } else if (role === "admin") {
+      const { data: scopedUsers, error: scopeErr } = await supabase
+        .from("user_profiles")
+        .select("user_id")
+        .eq("is_active", true);
+
+      if (scopeErr) {
+        return NextResponse.json({ error: scopeErr.message }, { status: 400 });
+      }
+
+      visibleUserIds = Array.from(
+        new Set([userId, ...(scopedUsers ?? []).map((r) => String(r.user_id))])
+      );
     }
 
-    let rows = (cpsData ?? []) as any[];
+    const { data: rowsRaw, error: rowsErr } = await supabase.rpc("contact_priority_scores_v2");
 
-    if (!isPrivileged) {
-      rows = rows.filter((r) => r.assigned_to_user_id === userId);
+    if (rowsErr) {
+      return NextResponse.json({ error: rowsErr.message }, { status: 400 });
+    }
+
+    let rows = (rowsRaw ?? []) as any[];
+
+    if (role !== "admin") {
+      rows = rows.filter((r) => visibleUserIds.includes(String(r.assigned_to_user_id || "")));
     }
 
     rows = rows.filter((r) => (r.status || "") !== "Closed/Do Not Contact");
 
     const ranked = rows
-      .map((r) => {
-        const vertical = normalizeVertical(r.vertical);
-
-        const scored = scoreContact({
-          vertical,
-          status: r.status ?? null,
-          cadence_status: r.cadence_status ?? null,
-          cadence_step: Number(r.cadence_step || 0),
-          last_activity_at: r.last_activity_at ?? null,
-          updated_at: r.updated_at ?? null,
-          cadence_next_due_at: r.cadence_next_due_at ?? null,
-          school_tier: r.school_tier ?? null,
-          account_tier: null,
-          role_seniority: r.role_seniority ?? r.job_title_raw ?? null,
-          market_segment: r.market_segment ?? null,
-          buying_intent: r.buying_intent ?? null,
-          company_size: r.company_size ?? null,
-          existing_score: Number(r.score || 0),
-        });
-
-        return {
-          id: r.id,
-          vertical,
-          first_name: r.first_name ?? null,
-          last_name: r.last_name ?? null,
-          primary_email: r.primary_email ?? null,
-          sport: r.sport ?? "",
-          status: r.status ?? null,
-          cadence_status: r.cadence_status ?? null,
-          cadence_step: Number(r.cadence_step || 0),
-          school_name: r.school_name ?? null,
-          account_name: r.account_name ?? null,
-          org_name: (r.org_name || r.account_name || r.school_name || null) as string | null,
-          assigned_to_user_id: r.assigned_to_user_id ?? null,
-          last_activity_at: r.last_activity_at ?? null,
-          updated_at: r.updated_at ?? null,
-          school_tier: r.school_tier ?? null,
-          priority_score: scored.priority_score,
-          momentum_label: scored.momentum_label,
-          momentum_score: scored.momentum_score,
-          priority_reason: scored.priority_reason,
-        };
-      })
+      .map((r) => ({
+        id: r.id,
+        vertical: normalizeVertical(r.vertical),
+        first_name: r.first_name ?? null,
+        last_name: r.last_name ?? null,
+        primary_email: r.primary_email ?? null,
+        sport: r.sport ?? "",
+        status: r.status ?? null,
+        cadence_status: r.cadence_status ?? null,
+        cadence_step: Number(r.cadence_step || 0),
+        school_name: r.school_name ?? null,
+        account_name: r.account_name ?? null,
+        org_name: (r.org_name || r.account_name || r.school_name || null) as string | null,
+        assigned_to_user_id: r.assigned_to_user_id ?? null,
+        last_activity_at: r.last_activity_at ?? null,
+        updated_at: r.updated_at ?? null,
+        school_tier: r.school_tier ?? null,
+        priority_score: Number(r.priority_score || 0),
+        momentum_label: r.momentum_label ?? "Cold",
+        momentum_score: Number(r.momentum_score || 0),
+        priority_reason: r.priority_reason ?? "",
+      }))
       .sort((a, b) => {
         if (b.priority_score !== a.priority_score) {
           return b.priority_score - a.priority_score;

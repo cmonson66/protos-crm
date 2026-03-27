@@ -35,10 +35,42 @@ type TaskRow = {
   created_at?: string | null;
 };
 
+type SequenceStepRow = {
+  sequence_id: string;
+  cadence_key: string;
+  cadence_name: string;
+  vertical: "athletics" | "corporate";
+  audience_stage: "new" | "secured_active";
+  sequence_status: string;
+  sequence_step_id: string;
+  step: number;
+  channel: "email" | "linkedin" | "call_script" | "task";
+  due_offset_days: number;
+  required_contact_status: string | null;
+  step_is_active: boolean;
+  template_id: string | null;
+  template_name: string | null;
+  template_key: string | null;
+  template_status: string | null;
+  template_channel: string | null;
+  template_type: string | null;
+  template_scope: string | null;
+  subject: string | null;
+  body: string | null;
+  call_to_action: string | null;
+};
+
 function addDays(d: Date, days: number) {
   const x = new Date(d);
   x.setDate(x.getDate() + days);
   return x;
+}
+
+function taskTypeFromChannel(channel: SequenceStepRow["channel"]) {
+  if (channel === "email") return "email";
+  if (channel === "linkedin") return "linkedin";
+  if (channel === "call_script") return "call_script";
+  return "task";
 }
 
 export async function POST(req: Request) {
@@ -105,36 +137,50 @@ export async function POST(req: Request) {
   const cadence_key = String(contact.cadence_key);
   const cadence_step = Number(contact.cadence_step || 0);
 
-  const { data: templateStep, error: templateErr } = await supabaseAdmin
-    .from("cadence_template_steps")
+  const { data: sequenceStep, error: templateErr } = await supabaseAdmin
+    .from("v_active_prospecting_sequence_steps")
     .select(`
+      sequence_id,
       cadence_key,
+      cadence_name,
+      vertical,
+      audience_stage,
+      sequence_status,
+      sequence_step_id,
       step,
-      subject,
-      body,
+      channel,
       due_offset_days,
       required_contact_status,
-      is_active
+      step_is_active,
+      template_id,
+      template_name,
+      template_key,
+      template_status,
+      template_channel,
+      template_type,
+      template_scope,
+      subject,
+      body,
+      call_to_action
     `)
     .eq("cadence_key", cadence_key)
     .eq("step", cadence_step)
-    .eq("is_active", true)
-    .maybeSingle();
+    .maybeSingle<SequenceStepRow>();
 
   if (templateErr) {
     return NextResponse.json({ error: templateErr.message }, { status: 500 });
   }
 
-  if (!templateStep) {
+  if (!sequenceStep) {
     return NextResponse.json(
-      { error: `No active template found for cadence_key=${cadence_key} step=${cadence_step}` },
+      { error: `No active sequence step found for cadence_key=${cadence_key} step=${cadence_step}` },
       { status: 400 }
     );
   }
 
   if (
-    templateStep.required_contact_status &&
-    String(templateStep.required_contact_status) !== String(contact.status || "")
+    sequenceStep.required_contact_status &&
+    String(sequenceStep.required_contact_status) !== String(contact.status || "")
   ) {
     const { error: stopErr } = await supabaseAdmin.rpc("cadence_stop", {
       p_contact_id: contact_id,
@@ -158,15 +204,15 @@ export async function POST(req: Request) {
   const nowIso = now.toISOString();
   const dueAt =
     contact.cadence_next_due_at ||
-    addDays(now, Number(templateStep.due_offset_days || 0)).toISOString();
+    addDays(now, Number(sequenceStep.due_offset_days || 0)).toISOString();
 
-  /**
-   * IMPORTANT:
-   * The DB uniqueness appears to be contact_id + kind + cadence_step,
-   * not necessarily cadence_key-aware.
-   *
-   * So repair must normalize tasks using the SAME scope as the unique constraint.
-   */
+  const desiredTaskType = taskTypeFromChannel(sequenceStep.channel);
+  const desiredTitle =
+    sequenceStep.subject ||
+    sequenceStep.template_name ||
+    `${sequenceStep.cadence_name} Step ${sequenceStep.step}`;
+  const desiredNotes = sequenceStep.body || "";
+
   const { data: stepScopedTasks, error: stepScopedTasksErr } = await supabaseAdmin
     .from("tasks")
     .select(`
@@ -211,6 +257,7 @@ export async function POST(req: Request) {
         .update({
           completed_at: nowIso,
           status: "closed",
+          updated_at: nowIso,
         })
         .in("id", duplicateIds);
 
@@ -226,14 +273,15 @@ export async function POST(req: Request) {
       .update({
         assigned_to_user_id: contact.assigned_to_user_id || me,
         owner_user_id: contact.owner_user_id || me,
-        task_type: "email",
+        task_type: desiredTaskType,
         due_at: dueAt,
-        title: templateStep.subject,
-        notes: templateStep.body,
+        title: desiredTitle,
+        notes: desiredNotes,
         status: "open",
         completed_at: null,
         cadence_key,
         cadence_step,
+        updated_at: nowIso,
       })
       .eq("id", keep.id);
 
@@ -251,14 +299,15 @@ export async function POST(req: Request) {
       .update({
         assigned_to_user_id: contact.assigned_to_user_id || me,
         owner_user_id: contact.owner_user_id || me,
-        task_type: "email",
+        task_type: desiredTaskType,
         due_at: dueAt,
-        title: templateStep.subject,
-        notes: templateStep.body,
+        title: desiredTitle,
+        notes: desiredNotes,
         status: "open",
         completed_at: null,
         cadence_key,
         cadence_step,
+        updated_at: nowIso,
       })
       .eq("id", existing.id);
 
@@ -268,10 +317,6 @@ export async function POST(req: Request) {
 
     actions.push("Normalized existing open cadence task");
   } else {
-    /**
-     * No open task exists for this step.
-     * Reuse any existing closed/stale task at this uniqueness scope before inserting.
-     */
     const reusableClosed = tasks[0] ?? null;
 
     if (reusableClosed?.id) {
@@ -282,14 +327,15 @@ export async function POST(req: Request) {
         .update({
           assigned_to_user_id: contact.assigned_to_user_id || me,
           owner_user_id: contact.owner_user_id || me,
-          task_type: "email",
+          task_type: desiredTaskType,
           due_at: dueAt,
-          title: templateStep.subject,
-          notes: templateStep.body,
+          title: desiredTitle,
+          notes: desiredNotes,
           status: "open",
           completed_at: null,
           cadence_key,
           cadence_step,
+          updated_at: nowIso,
         })
         .eq("id", reusableClosed.id);
 
@@ -305,10 +351,10 @@ export async function POST(req: Request) {
           contact_id,
           assigned_to_user_id: contact.assigned_to_user_id || me,
           owner_user_id: contact.owner_user_id || me,
-          task_type: "email",
+          task_type: desiredTaskType,
           due_at: dueAt,
-          title: templateStep.subject,
-          notes: templateStep.body,
+          title: desiredTitle,
+          notes: desiredNotes,
           status: "open",
           kind: "cadence",
           cadence_key,
@@ -351,6 +397,7 @@ export async function POST(req: Request) {
     subject: "Cadence repaired",
     body: [
       `Cadence ${cadence_key} repaired at step ${cadence_step}.`,
+      `Step channel: ${sequenceStep.channel}.`,
       ...actions,
     ].join("\n"),
     outcome: "repair",
@@ -364,6 +411,7 @@ export async function POST(req: Request) {
     cadence_step,
     task_id: repairedTaskId,
     due_at: dueAt,
+    channel: sequenceStep.channel,
     actions,
   });
 }

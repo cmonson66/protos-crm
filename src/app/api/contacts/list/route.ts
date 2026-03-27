@@ -4,7 +4,7 @@ import { scoreContact } from "@/lib/priorityEngine";
 
 export const runtime = "nodejs";
 
-type Vertical = "coaching" | "corporate";
+type Vertical = "athletics" | "corporate";
 
 type ContactRow = {
   id: string;
@@ -42,7 +42,7 @@ type SortBy =
 type SortDir = "asc" | "desc";
 
 function normalizeVertical(value: unknown): Vertical {
-  return value === "corporate" ? "corporate" : "coaching";
+  return value === "corporate" ? "corporate" : "athletics";
 }
 
 export async function GET(req: Request) {
@@ -117,12 +117,44 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "User inactive" }, { status: 403 });
     }
 
-    const isAdmin =
-      !!meProfile?.is_admin ||
-      meProfile?.role === "admin" ||
-      meProfile?.role === "manager";
+    const role = meProfile?.is_admin
+      ? "admin"
+      : meProfile?.role === "manager"
+        ? "manager"
+        : "rep";
 
-    const { data: cpsData, error: cpsErr } = await supabase.rpc("contact_priority_scores");
+    let visibleUserIds = [userId];
+
+    if (role === "manager") {
+      const { data: scopedUsers, error: scopeErr } = await supabase
+        .from("user_profiles")
+        .select("user_id")
+        .eq("is_active", true)
+        .eq("manager_user_id", userId);
+
+      if (scopeErr) {
+        return NextResponse.json({ error: scopeErr.message }, { status: 400 });
+      }
+
+      visibleUserIds = Array.from(
+        new Set([userId, ...(scopedUsers ?? []).map((r) => String(r.user_id))])
+      );
+    } else if (role === "admin") {
+      const { data: scopedUsers, error: scopeErr } = await supabase
+        .from("user_profiles")
+        .select("user_id")
+        .eq("is_active", true);
+
+      if (scopeErr) {
+        return NextResponse.json({ error: scopeErr.message }, { status: 400 });
+      }
+
+      visibleUserIds = Array.from(
+        new Set([userId, ...(scopedUsers ?? []).map((r) => String(r.user_id))])
+      );
+    }
+
+    const { data: cpsData, error: cpsErr } = await supabase.rpc("contact_priority_scores_v2");
 
     if (cpsErr) {
       return NextResponse.json({ error: cpsErr.message }, { status: 400 });
@@ -130,8 +162,8 @@ export async function GET(req: Request) {
 
     let rows = (cpsData ?? []) as any[];
 
-    if (!isAdmin) {
-      rows = rows.filter((r) => r.assigned_to_user_id === userId);
+    if (role !== "admin") {
+      rows = rows.filter((r) => visibleUserIds.includes(String(r.assigned_to_user_id || "")));
     }
 
     if (sport) {
@@ -146,7 +178,7 @@ export async function GET(req: Request) {
       rows = rows.filter((r) => (r.cadence_status || "") === cadenceStatus);
     }
 
-    if (isAdmin) {
+    if (role !== "rep") {
       if (unassigned) {
         rows = rows.filter((r) => !r.assigned_to_user_id);
       } else if (assignedTo) {
@@ -201,12 +233,20 @@ export async function GET(req: Request) {
         updated_at: r.updated_at ?? null,
         cadence_next_due_at: r.cadence_next_due_at ?? null,
         school_tier: r.school_tier ?? null,
-        account_tier: null,
+        account_tier: r.account_tier ?? null,
         role_seniority: r.role_seniority ?? r.job_title_raw ?? null,
         market_segment: r.market_segment ?? null,
         buying_intent: r.buying_intent ?? null,
         company_size: r.company_size ?? null,
-        existing_score: Number(r.score || 0),
+        open_task_count: r.open_task_count ?? null,
+        due_task_count: r.due_task_count ?? null,
+        overdue_task_count: r.overdue_task_count ?? null,
+        open_cadence_task_count: r.open_cadence_task_count ?? null,
+        radar_promotion_open_count: r.radar_promotion_open_count ?? null,
+        touches_7d: r.touches_7d ?? null,
+        touches_30d: r.touches_30d ?? null,
+        completed_touches_30d: r.completed_touches_30d ?? null,
+        snoozes_30d: r.snoozes_30d ?? null,
       });
 
       return {

@@ -118,79 +118,79 @@ export default function AccountsPage() {
   }, []);
 
   async function runAccountAction(
-  accountId: string,
-  action: "work_hottest_contact" | "create_account_task" | "find_missing_buyer"
-) {
-  setBusyAccountId(accountId);
-  setErr(null);
+    accountId: string,
+    action: "work_hottest_contact" | "create_account_task" | "find_missing_buyer"
+  ) {
+    setBusyAccountId(accountId);
+    setErr(null);
 
-  const body: Record<string, unknown> = {
-    account_id: accountId,
-    action,
-  };
+    const body: Record<string, unknown> = {
+      account_id: accountId,
+      action,
+    };
 
-  if (action === "create_account_task") {
-    body.due_days = 2;
-  }
+    if (action === "create_account_task") {
+      body.due_days = 2;
+    }
 
-  if (action === "find_missing_buyer") {
-    body.due_days = 1;
-  }
-
-  try {
-    const res = await fetchWithAuth("/api/accounts/action", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    const raw = await res.text();
-    let json: any = {};
+    if (action === "find_missing_buyer") {
+      body.due_days = 1;
+    }
 
     try {
-      json = raw ? JSON.parse(raw) : {};
-    } catch {
-      json = { raw };
-    }
+      const res = await fetchWithAuth("/api/accounts/action", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
 
-    if (!res.ok) {
-      const message =
-        json?.error ||
-        json?.message ||
-        json?.details ||
-        json?.raw ||
-        `Account action failed (${res.status})`;
+      const raw = await res.text();
+      let json: any = {};
 
-      setErr(message);
+      try {
+        json = raw ? JSON.parse(raw) : {};
+      } catch {
+        json = { raw };
+      }
+
+      if (!res.ok) {
+        const message =
+          json?.error ||
+          json?.message ||
+          json?.details ||
+          json?.raw ||
+          `Account action failed (${res.status})`;
+
+        setErr(message);
+        setBusyAccountId(null);
+        return;
+      }
+
+      const taskId = json?.task_id ? String(json.task_id) : "";
+
+      if (action === "work_hottest_contact") {
+        setToast("Hottest contact promoted to Work Queue");
+        setBusyAccountId(null);
+        router.push(taskId ? `/work?task_id=${encodeURIComponent(taskId)}` : "/work");
+        return;
+      }
+
+      if (action === "create_account_task") {
+        setToast("Account task created");
+        setBusyAccountId(null);
+        router.push(taskId ? `/work?task_id=${encodeURIComponent(taskId)}` : "/work");
+        return;
+      }
+
+      setToast("Missing buyer task created");
       setBusyAccountId(null);
+      router.push(taskId ? `/work?task_id=${encodeURIComponent(taskId)}` : "/work");
       return;
+    } catch (e: any) {
+      setErr(e?.message || "Account action failed");
+      setBusyAccountId(null);
     }
-
-    const taskId = json?.task_id ? String(json.task_id) : "";
-
-if (action === "work_hottest_contact") {
-  setToast("Hottest contact promoted to Work Queue");
-  setBusyAccountId(null);
-  router.push(taskId ? `/work?task_id=${encodeURIComponent(taskId)}` : "/work");
-  return;
-}
-
-if (action === "create_account_task") {
-  setToast("Account task created");
-  setBusyAccountId(null);
-  router.push(taskId ? `/work?task_id=${encodeURIComponent(taskId)}` : "/work");
-  return;
-}
-
-setToast("Missing buyer task created");
-setBusyAccountId(null);
-router.push(taskId ? `/work?task_id=${encodeURIComponent(taskId)}` : "/work");
-return;
-  } catch (e: any) {
-    setErr(e?.message || "Account action failed");
-    setBusyAccountId(null);
   }
-}
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -208,73 +208,81 @@ return;
   }, [rows, q]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8 p-6">
       {toast ? (
-        <div className="fixed right-6 top-6 z-50 rounded-2xl border bg-white px-4 py-3 shadow">
-          <div className="text-sm font-semibold">{toast}</div>
+        <div className="fixed right-6 top-6 z-50 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-lg">
+          <div className="text-sm font-semibold text-slate-900">{toast}</div>
         </div>
       ) : null}
 
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-4xl font-semibold">Accounts Radar</h1>
-          <div className="mt-1 text-sm text-muted-foreground">
-            Ranked account heat, buying-committee coverage, and coordinated pursuit signals.
-          </div>
-        </div>
+      <div className="crm-card overflow-hidden p-0">
+        <div className="border-b border-white/70 bg-gradient-to-r from-white/95 via-white/85 to-rose-50/80 px-6 py-6">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h1 className="text-4xl font-semibold tracking-tight text-slate-900">
+                Accounts Radar
+              </h1>
+              <div className="mt-2 text-sm text-slate-600">
+                Ranked account heat, buying-committee coverage, and coordinated pursuit
+                signals.
+              </div>
+            </div>
 
-        <div className="flex gap-2">
-          <Link href="/contacts" className="rounded-xl border px-5 py-3 hover:bg-slate-50">
-            Contacts
-          </Link>
-          <Link href="/work" className="rounded-xl border px-5 py-3 hover:bg-slate-50">
-            Work Queue
-          </Link>
-          
-          <button onClick={() => void load()} className="rounded-xl border px-5 py-3">
-            Refresh
-          </button>
+            <div className="flex gap-2">
+              <Link href="/contacts" className="crm-button px-5 py-3">
+                Contacts
+              </Link>
+              <Link href="/work" className="crm-button px-5 py-3">
+                Work Queue
+              </Link>
+              <button onClick={() => void load()} className="crm-button px-5 py-3">
+                Refresh
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-[1fr_160px_160px]">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search account, industry, top contact..."
-          className="rounded-xl border px-4 py-3"
-        />
+      <div className="crm-card p-6">
+        <div className="grid gap-3 md:grid-cols-[1fr_160px_160px]">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search account, industry, top contact..."
+            className="crm-input px-4 py-3"
+          />
 
-        <select
-          value={limit}
-          onChange={(e) => {
-            const next = Number(e.target.value || 24);
-            setLimit(next);
-            void load(next);
-          }}
-          className="rounded-xl border px-4 py-3"
-        >
-          <option value={12}>Top 12</option>
-          <option value={24}>Top 24</option>
-          <option value={50}>Top 50</option>
-          <option value={100}>Top 100</option>
-        </select>
+          <select
+            value={limit}
+            onChange={(e) => {
+              const next = Number(e.target.value || 24);
+              setLimit(next);
+              void load(next);
+            }}
+            className="crm-input px-4 py-3"
+          >
+            <option value={12}>Top 12</option>
+            <option value={24}>Top 24</option>
+            <option value={50}>Top 50</option>
+            <option value={100}>Top 100</option>
+          </select>
 
-        <div className="rounded-xl border px-4 py-3 text-sm text-muted-foreground">
-          {loading ? "Loading..." : `${filtered.length} accounts`}
+          <div className="crm-card-soft flex items-center px-4 py-3 text-sm text-slate-500">
+            {loading ? "Loading..." : `${filtered.length} accounts`}
+          </div>
         </div>
       </div>
 
       {err ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-700">
+        <div className="crm-card border-red-200 bg-red-50 p-4 text-red-700">
           {err}
         </div>
       ) : null}
 
       {loading ? (
-        <div className="text-muted-foreground">Loading account radar…</div>
+        <div className="crm-card p-6 text-sm text-slate-500">Loading account radar…</div>
       ) : filtered.length === 0 ? (
-        <div className="rounded-2xl border p-8 text-center text-muted-foreground">
+        <div className="crm-card p-8 text-center text-slate-500">
           No accounts found.
         </div>
       ) : (
@@ -283,11 +291,11 @@ return;
             const isBusy = busyAccountId === row.account_id;
 
             return (
-              <div key={row.account_id} className="rounded-2xl border p-5">
+              <div key={row.account_id} className="crm-card p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-semibold text-muted-foreground">
+                      <span className="text-xs font-semibold text-slate-500">
                         #{idx + 1}
                       </span>
                       <span
@@ -299,9 +307,11 @@ return;
                       </span>
                     </div>
 
-                    <div className="mt-2 text-xl font-semibold">{row.name}</div>
+                    <div className="mt-2 text-xl font-semibold text-slate-900">
+                      {row.name}
+                    </div>
 
-                    <div className="mt-1 text-sm text-muted-foreground">
+                    <div className="mt-1 text-sm text-slate-500">
                       {row.industry || "No industry"}
                       {row.company_size ? ` • ${row.company_size}` : ""}
                       {row.hq_location ? ` • ${row.hq_location}` : ""}
@@ -313,11 +323,11 @@ return;
                   </div>
 
                   <div className="text-right">
-                    <div className="rounded-xl border px-4 py-3">
-                      <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                    <div className="crm-card-soft px-4 py-3">
+                      <div className="text-xs uppercase tracking-wide text-slate-500">
                         Heat Score
                       </div>
-                      <div className="mt-1 text-3xl font-semibold">
+                      <div className="mt-1 text-3xl font-semibold text-slate-900">
                         {row.heat.account_heat_score}
                       </div>
                     </div>
@@ -325,36 +335,46 @@ return;
                 </div>
 
                 <div className="mt-5 grid gap-3 md:grid-cols-5">
-                  <div className="rounded-xl border p-3">
-                    <div className="text-xs text-muted-foreground">Contacts</div>
-                    <div className="mt-1 text-xl font-semibold">{row.total_contacts}</div>
+                  <div className="crm-card-soft p-3">
+                    <div className="text-xs text-slate-500">Contacts</div>
+                    <div className="mt-1 text-xl font-semibold text-slate-900">
+                      {row.total_contacts}
+                    </div>
                   </div>
 
-                  <div className="rounded-xl border p-3">
-                    <div className="text-xs text-muted-foreground">Active Cadences</div>
-                    <div className="mt-1 text-xl font-semibold">{row.active_cadences}</div>
+                  <div className="crm-card-soft p-3">
+                    <div className="text-xs text-slate-500">Active Cadences</div>
+                    <div className="mt-1 text-xl font-semibold text-slate-900">
+                      {row.active_cadences}
+                    </div>
                   </div>
 
-                  <div className="rounded-xl border p-3">
-                    <div className="text-xs text-muted-foreground">Touched 7d</div>
-                    <div className="mt-1 text-xl font-semibold">{row.touched_last_7_days}</div>
+                  <div className="crm-card-soft p-3">
+                    <div className="text-xs text-slate-500">Touched 7d</div>
+                    <div className="mt-1 text-xl font-semibold text-slate-900">
+                      {row.touched_last_7_days}
+                    </div>
                   </div>
 
-                  <div className="rounded-xl border p-3">
-                    <div className="text-xs text-muted-foreground">Stale</div>
-                    <div className="mt-1 text-xl font-semibold">{row.stale_contacts}</div>
+                  <div className="crm-card-soft p-3">
+                    <div className="text-xs text-slate-500">Stale</div>
+                    <div className="mt-1 text-xl font-semibold text-slate-900">
+                      {row.stale_contacts}
+                    </div>
                   </div>
 
-                  <div className="rounded-xl border p-3">
-                    <div className="text-xs text-muted-foreground">Secured</div>
-                    <div className="mt-1 text-xl font-semibold">
+                  <div className="crm-card-soft p-3">
+                    <div className="text-xs text-slate-500">Secured</div>
+                    <div className="mt-1 text-xl font-semibold text-slate-900">
                       {row.secured_active_contacts}
                     </div>
                   </div>
                 </div>
 
                 <div className="mt-5">
-                  <div className="text-sm font-semibold">Buying Committee Coverage</div>
+                  <div className="text-sm font-semibold text-slate-900">
+                    Buying Committee Coverage
+                  </div>
 
                   <div className="mt-3 grid gap-3 md:grid-cols-4">
                     <div
@@ -391,63 +411,67 @@ return;
                   </div>
                 </div>
 
-                <div className="mt-5 rounded-xl border bg-slate-50 p-4">
-                  <div className="text-xs text-muted-foreground">Top Contact</div>
-                  <div className="mt-1 text-sm font-semibold">
+                <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-xs text-slate-500">Top Contact</div>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">
                     {row.highest_priority_contact_name || "—"}
                   </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
+                  <div className="mt-1 text-xs text-slate-500">
                     Priority {row.highest_priority_score} • Last account activity{" "}
                     {formatDateTime(row.most_recent_activity_at)}
                   </div>
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-  <Link
-    href={`/accounts/${row.account_id}`}
-    className="rounded-xl border px-4 py-2 text-sm hover:bg-slate-50"
-  >
-    Open Workspace
-  </Link>
+                  <Link
+                    href={`/accounts/${row.account_id}`}
+                    className="crm-button px-4 py-2 text-sm"
+                  >
+                    Open Workspace
+                  </Link>
 
-  {row.highest_priority_contact_id ? (
-    <Link
-      href={`/contacts/${row.highest_priority_contact_id}`}
-      className="rounded-xl border px-4 py-2 text-sm hover:bg-slate-50"
-    >
-      Open Top Contact
-    </Link>
-  ) : null}
+                  {row.highest_priority_contact_id ? (
+                    <Link
+                      href={`/contacts/${row.highest_priority_contact_id}`}
+                      className="crm-button px-4 py-2 text-sm"
+                    >
+                      Open Top Contact
+                    </Link>
+                  ) : null}
 
-  <button
-    type="button"
-    disabled={isBusy}
-    onClick={() =>
-      void runAccountAction(row.account_id, "work_hottest_contact")
-    }
-    className="rounded-xl border px-4 py-2 text-sm disabled:opacity-50"
-  >
-    {isBusy ? "Working..." : "Work Hottest Contact"}
-  </button>
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() =>
+                      void runAccountAction(row.account_id, "work_hottest_contact")
+                    }
+                    className="crm-button px-4 py-2 text-sm disabled:opacity-50"
+                  >
+                    {isBusy ? "Working..." : "Work Hottest Contact"}
+                  </button>
 
-  <button
-    type="button"
-    disabled={isBusy}
-    onClick={() => void runAccountAction(row.account_id, "create_account_task")}
-    className="rounded-xl border px-4 py-2 text-sm disabled:opacity-50"
-  >
-    {isBusy ? "Working..." : "Create Account Task"}
-  </button>
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() =>
+                      void runAccountAction(row.account_id, "create_account_task")
+                    }
+                    className="crm-button px-4 py-2 text-sm disabled:opacity-50"
+                  >
+                    {isBusy ? "Working..." : "Create Account Task"}
+                  </button>
 
-  <button
-    type="button"
-    disabled={isBusy}
-    onClick={() => void runAccountAction(row.account_id, "find_missing_buyer")}
-    className="rounded-xl border px-4 py-2 text-sm disabled:opacity-50"
-  >
-    {isBusy ? "Working..." : "Find Missing Buyer"}
-  </button>
-</div>
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() =>
+                      void runAccountAction(row.account_id, "find_missing_buyer")
+                    }
+                    className="crm-button px-4 py-2 text-sm disabled:opacity-50"
+                  >
+                    {isBusy ? "Working..." : "Find Missing Buyer"}
+                  </button>
+                </div>
               </div>
             );
           })}
