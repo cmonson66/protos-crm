@@ -15,6 +15,7 @@ export type PriorityEngineInput = {
   market_segment?: string | null;
   buying_intent?: string | null;
   company_size?: number | null;
+  existing_score?: number | null;
 
   open_task_count?: number | null;
   due_task_count?: number | null;
@@ -75,6 +76,7 @@ export function scoreContact(input: PriorityEngineInput): PriorityEngineResult {
   const touches7d = Number(input.touches_7d || 0);
   const completedTouches30d = Number(input.completed_touches_30d || 0);
   const snoozes30d = Number(input.snoozes_30d || 0);
+  const existingScore = Number(input.existing_score || 0);
 
   const staleDays = daysSince(input.last_activity_at);
   const updatedDays = daysSince(input.updated_at);
@@ -86,6 +88,12 @@ export function scoreContact(input: PriorityEngineInput): PriorityEngineResult {
     label: vertical === "corporate" ? "Corporate contact" : "Athletics contact",
     points: 0,
   });
+
+  if (existingScore > 0) {
+    const carryForward = clamp(Math.round(existingScore * 0.15), 0, 15);
+    score += carryForward;
+    breakdown.push({ label: "Existing score carry-forward", points: carryForward });
+  }
 
   if (status === "New") {
     score += 18;
