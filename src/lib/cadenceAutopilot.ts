@@ -4,6 +4,7 @@ export type CadenceSignal =
   | "touch"
   | "call"
   | "email"
+  | "linkedin"
   | "note"
   | "meeting"
   | "reply";
@@ -76,6 +77,8 @@ function signalLabel(signal: CadenceSignal) {
       return "Call logged";
     case "email":
       return "Email logged";
+    case "linkedin":
+      return "LinkedIn logged";
     case "note":
       return "Note logged";
     case "meeting":
