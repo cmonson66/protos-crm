@@ -16,7 +16,7 @@ type ContactLite = {
   cadence_next_due_at: string | null;
   assigned_to_user_id: string | null;
   school_id?: string | null;
-  schools?: { name: string | null } | null;
+  schools?: { name: string | null }[] | null;
 };
 
 type OpenTaskLite = {
@@ -35,7 +35,7 @@ function fullName(c: ContactLite) {
 }
 
 function schoolName(c: ContactLite) {
-  return c.schools?.name ?? null;
+  return c.schools?.[0]?.name ?? null;
 }
 
 function contactLabel(c: ContactLite) {
