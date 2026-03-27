@@ -1,9 +1,8 @@
-// src/lib/supabaseServer.ts
-import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
-export function supabaseServer() {
-  const cookieStore = cookies();
+export async function createSupabaseServerClient() {
+  const cookieStore = await cookies();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -15,11 +14,11 @@ export function supabaseServer() {
         },
         setAll(cookiesToSet) {
           try {
-            cookiesToSet.forEach(({ name, value, options }) => {
+            for (const { name, value, options } of cookiesToSet) {
               cookieStore.set(name, value, options);
-            });
+            }
           } catch {
-            // ignore in RSC; middleware handles refresh
+            // Ignore in contexts where cookies are read-only
           }
         },
       },
