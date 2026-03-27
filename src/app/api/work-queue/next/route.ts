@@ -13,6 +13,20 @@ type PriorityRow = {
   priority_score?: number | null;
 };
 
+type ContactRelation = {
+  id: string;
+  vertical: Vertical | "coaching";
+  first_name: string | null;
+  last_name: string | null;
+  primary_email: string | null;
+  job_title_raw: string | null;
+  sport: string | null;
+  assigned_to_user_id?: string | null;
+  owner_user_id?: string | null;
+  schools: { name: string | null }[] | null;
+  accounts: { name: string | null }[] | null;
+};
+
 type RawTaskRow = {
   id: string;
   due_at: string;
@@ -26,19 +40,7 @@ type RawTaskRow = {
   contact_id: string;
   assigned_to_user_id?: string | null;
   owner_user_id?: string | null;
-  contacts: {
-    id: string;
-    vertical: Vertical | "coaching";
-    first_name: string | null;
-    last_name: string | null;
-    primary_email: string | null;
-    job_title_raw: string | null;
-    sport: string | null;
-    assigned_to_user_id?: string | null;
-    owner_user_id?: string | null;
-    schools: { name: string } | null;
-    accounts: { name: string } | null;
-  } | null;
+  contacts: ContactRelation[] | null;
 };
 
 function classifyUrgency(dueAt: string | null) {
@@ -123,7 +125,9 @@ export async function GET(req: Request) {
     const excludeTaskId = String(url.searchParams.get("exclude_task_id") || "").trim();
     const taskId = String(url.searchParams.get("task_id") || "").trim();
 
-    const { data: priorityRows, error: priorityErr } = await supabaseAdmin.rpc("contact_priority_scores_v2");
+    const { data: priorityRows, error: priorityErr } = await supabaseAdmin.rpc(
+      "contact_priority_scores_v2"
+    );
 
     if (priorityErr) {
       return NextResponse.json({ error: priorityErr.message }, { status: 500 });
@@ -189,21 +193,23 @@ export async function GET(req: Request) {
 
     const rows = ((data ?? []) as RawTaskRow[])
       .filter((row) => {
-        if (!row.contacts) return false;
+        const contact = row.contacts?.[0] ?? null;
+        if (!contact) return false;
         if (excludeTaskId && row.id === excludeTaskId) return false;
         if (isAdmin) return true;
         return row.assigned_to_user_id === me;
       })
       .map((row) => {
         const priority = priorityByContactId.get(row.contact_id);
+        const contact = row.contacts?.[0] ?? null;
 
         return {
           ...row,
-          contacts: row.contacts
+          contacts: contact
             ? {
-                ...row.contacts,
-                vertical: normalizeVertical(row.contacts.vertical),
-                sport: row.contacts.sport ?? "",
+                ...contact,
+                vertical: normalizeVertical(contact.vertical),
+                sport: contact.sport ?? "",
               }
             : null,
           __queue_rank: queueRank({
