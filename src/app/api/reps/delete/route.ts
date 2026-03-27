@@ -85,57 +85,59 @@ export async function POST(req: Request) {
 
   const targetLabel = target.full_name || target.email || target.user_id;
 
-  // 1) Clear references from contacts
+  // 1) Reassign contact assignments to actor
   const { error: contactsAssignedErr } = await supabaseAdmin
     .from("contacts")
-    .update({ assigned_to_user_id: null })
+    .update({ assigned_to_user_id: me })
     .eq("assigned_to_user_id", user_id);
 
   if (contactsAssignedErr) {
     return NextResponse.json(
-      { error: `Failed clearing contact assignments: ${contactsAssignedErr.message}` },
+      { error: `Failed reassigning contact assignments: ${contactsAssignedErr.message}` },
       { status: 500 }
     );
   }
 
+  // 2) Reassign contact ownership to actor
   const { error: contactsOwnerErr } = await supabaseAdmin
     .from("contacts")
-    .update({ owner_user_id: null })
+    .update({ owner_user_id: me })
     .eq("owner_user_id", user_id);
 
   if (contactsOwnerErr) {
     return NextResponse.json(
-      { error: `Failed clearing contact ownership: ${contactsOwnerErr.message}` },
+      { error: `Failed reassigning contact ownership: ${contactsOwnerErr.message}` },
       { status: 500 }
     );
   }
 
-  // 2) Clear references from tasks
+  // 3) Reassign task assignments to actor (NOT NULL column)
   const { error: tasksAssignedErr } = await supabaseAdmin
     .from("tasks")
-    .update({ assigned_to_user_id: null })
+    .update({ assigned_to_user_id: me })
     .eq("assigned_to_user_id", user_id);
 
   if (tasksAssignedErr) {
     return NextResponse.json(
-      { error: `Failed clearing task assignments: ${tasksAssignedErr.message}` },
+      { error: `Failed reassigning task assignments: ${tasksAssignedErr.message}` },
       { status: 500 }
     );
   }
 
+  // 4) Reassign task ownership to actor
   const { error: tasksOwnerErr } = await supabaseAdmin
     .from("tasks")
-    .update({ owner_user_id: null })
+    .update({ owner_user_id: me })
     .eq("owner_user_id", user_id);
 
   if (tasksOwnerErr) {
     return NextResponse.json(
-      { error: `Failed clearing task ownership: ${tasksOwnerErr.message}` },
+      { error: `Failed reassigning task ownership: ${tasksOwnerErr.message}` },
       { status: 500 }
     );
   }
 
-  // 3) Remove this user as manager from other profiles
+  // 5) Remove this user as manager from other profiles
   const { error: managerRefErr } = await supabaseAdmin
     .from("user_profiles")
     .update({ manager_user_id: null })
@@ -148,7 +150,7 @@ export async function POST(req: Request) {
     );
   }
 
-  // 4) Delete this user's activities
+  // 6) Delete this user's activities
   const { error: activitiesErr } = await supabaseAdmin
     .from("activities")
     .delete()
@@ -161,7 +163,7 @@ export async function POST(req: Request) {
     );
   }
 
-  // 5) Delete the profile row first
+  // 7) Delete profile row
   const { error: profileDeleteErr } = await supabaseAdmin
     .from("user_profiles")
     .delete()
@@ -174,7 +176,7 @@ export async function POST(req: Request) {
     );
   }
 
-  // 6) Delete auth user last
+  // 8) Delete auth user last
   const { error: deleteErr } = await supabaseAdmin.auth.admin.deleteUser(user_id);
 
   if (deleteErr) {
@@ -184,14 +186,14 @@ export async function POST(req: Request) {
     );
   }
 
-  // 7) Audit log
+  // 9) Audit log
   await supabaseAdmin.from("activities").insert({
     contact_id: null,
     user_id: me,
     type: "note",
     occurred_at: new Date().toISOString(),
     subject: "User deleted",
-    body: `User ${targetLabel} was deleted. References in contacts, tasks, manager assignments, and activities were cleared first.`,
+    body: `User ${targetLabel} was deleted. Contacts and tasks were reassigned to the deleting user first.`,
   });
 
   return NextResponse.json({ ok: true });
