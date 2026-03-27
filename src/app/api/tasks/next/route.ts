@@ -23,10 +23,10 @@ type QueueTask = {
     last_name: string | null;
     primary_email: string | null;
     job_title_raw: string | null;
-    sport: string;
-    schools: { name: string } | null;
-    accounts: { name: string } | null;
-  } | null;
+    sport: string | null;
+    schools: { name: string | null }[] | null;
+    accounts: { name: string | null }[] | null;
+  }[] | null;
 };
 
 function taskPriorityScore(task: QueueTask) {
