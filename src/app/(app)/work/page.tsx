@@ -880,11 +880,15 @@ export default function WorkPage() {
           </SectionCard>
 
           <SectionCard title="Current Task">
-            <div className="text-sm font-semibold">{current.title?.trim() || "(no title)"}</div>
-            <div className="mt-2 text-sm text-muted-foreground">
-              Type: {current.task_type} • Due:{" "}
-              {current.due_at ? new Date(current.due_at).toLocaleString() : "—"}
-            </div>
+              <div className="text-sm font-semibold">
+                {current?.title?.trim() || "(no title)"}
+              </div>
+
+              <div className="mt-2 text-sm text-muted-foreground">
+                Type: {current?.task_type || "—"} • Due:{" "}
+                {current?.due_at ? new Date(current.due_at).toLocaleString() : "—"}
+              </div>
+            
             <div className="mt-2 text-xs text-muted-foreground">
               Preloaded next: {next ? "Yes" : "No"}
             </div>
