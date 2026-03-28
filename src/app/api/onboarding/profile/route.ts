@@ -100,13 +100,16 @@ export async function POST(req: Request) {
 
   const { data: existing, error: existingErr } = await supabaseAdmin
     .from("user_profiles")
-    .select("manager_user_id")
+    .select("manager_user_id, onboarding_completed_at")
     .eq("user_id", me)
     .maybeSingle();
 
   if (existingErr) {
     return NextResponse.json({ error: existingErr.message }, { status: 500 });
   }
+
+  const firstCompletion = !existing?.onboarding_completed_at;
+  const completedAt = new Date().toISOString();
 
   const { error } = await supabaseAdmin
     .from("user_profiles")
@@ -124,7 +127,7 @@ export async function POST(req: Request) {
         timezone,
         avatar_url,
         onboarding_notes,
-        onboarding_completed_at: new Date().toISOString(),
+        onboarding_completed_at: completedAt,
         manager_user_id: existing?.manager_user_id ?? null,
       },
       { onConflict: "user_id" }
@@ -132,6 +135,21 @@ export async function POST(req: Request) {
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // Only fire the completion event once, and only for reps.
+  if (firstCompletion && role === "rep") {
+    const label = full_name || email || me;
+
+    await supabaseAdmin.from("activities").insert({
+      contact_id: null,
+      user_id: me,
+      type: "system",
+      occurred_at: completedAt,
+      subject: "Rep setup completed",
+      body: `${label} completed account setup.`,
+      outcome: "onboarding_completed",
+    });
   }
 
   return NextResponse.json({ ok: true });

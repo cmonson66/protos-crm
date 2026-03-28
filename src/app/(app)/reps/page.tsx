@@ -22,6 +22,16 @@ type MeResponse = {
   is_active: boolean;
 };
 
+type SetupAlert = {
+  id: string;
+  occurred_at: string | null;
+  subject: string;
+  body: string | null;
+  rep_user_id: string | null;
+  rep_name: string | null;
+  rep_email: string | null;
+};
+
 function canManageTarget(args: {
   actorRole: Role;
   actorUserId: string;
@@ -80,6 +90,7 @@ export default function RepsPage() {
   const [busy, setBusy] = useState(false);
 
   const [me, setMe] = useState<MeResponse | null>(null);
+const [setupAlerts, setSetupAlerts] = useState<SetupAlert[]>([]);
 
   function clearBanners() {
     setErr(null);
@@ -126,10 +137,23 @@ export default function RepsPage() {
     setLoading(false);
   }
 
+  async function loadSetupAlerts() {
+  const res = await fetchWithAuth("/api/reps/setup-alerts");
+  const json = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    setSetupAlerts([]);
+    return;
+  }
+
+  setSetupAlerts((json.data ?? []) as SetupAlert[]);
+}
+
   useEffect(() => {
-    void loadMe();
-    void load();
-  }, []);
+  void loadMe();
+  void load();
+  void loadSetupAlerts();
+}, []);
 
   const isPrivileged = me?.role === "admin" || me?.role === "manager";
 
@@ -216,6 +240,7 @@ export default function RepsPage() {
       setActionLink(json?.action_link || null);
 
       await load();
+      await loadSetupAlerts();
     }
 
     setBusy(false);
@@ -264,6 +289,7 @@ export default function RepsPage() {
     } else {
       setSuccess("User updated.");
       await load();
+      await loadSetupAlerts();
     }
 
     setBusy(false);
@@ -329,6 +355,7 @@ export default function RepsPage() {
     } else {
       setSuccess("User deleted.");
       await load();
+      await loadSetupAlerts();
     }
 
     setBusy(false);
@@ -391,9 +418,12 @@ export default function RepsPage() {
 
             <div className="flex gap-2">
               <button
-                onClick={() => void load()}
-                className="crm-button px-5 py-2.5"
-              >
+              onClick={() => {
+                void load();
+                void loadSetupAlerts();
+              }}
+              className="crm-button px-5 py-2.5"
+            >
                 Refresh
               </button>
             </div>
@@ -490,6 +520,12 @@ export default function RepsPage() {
       <div className="crm-card p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
+            {isPrivileged && setupAlerts.length > 0 ? (
+              <div className="crm-card p-6">
+                ...
+              </div>
+            ) : null}
+            
             <div className="text-lg font-semibold text-slate-900">
               Invite User
             </div>
