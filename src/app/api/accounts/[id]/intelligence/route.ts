@@ -261,7 +261,7 @@ export async function GET(
         buying_intent: scoreRow?.buying_intent ?? null,
         company_size: scoreRow?.company_size ?? null,
         existing_score: Number(scoreRow?.score || 0),
-      } as any);
+      });
 
       const inferredRole = inferBuyingCommitteeRole(c.job_title_raw);
       const overrideRole = String(c.buying_committee_role_override || "").trim() as

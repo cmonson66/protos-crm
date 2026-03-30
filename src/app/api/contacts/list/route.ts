@@ -154,7 +154,23 @@ export async function GET(req: Request) {
       );
     }
 
-    const { data: cpsData, error: cpsErr } = await supabase.rpc("contact_priority_scores_v2");
+    const offset = (page - 1) * pageSize;
+
+    const { data: cpsData, error: cpsErr } = await supabase.rpc(
+      "contact_priority_scores_v2",
+      {
+        p_limit: pageSize,
+        p_offset: offset,
+      }
+    );
+
+    const { data: totalCount, error: totalErr } = await supabase.rpc(
+      "contact_priority_scores_v2_count"
+    );
+
+    if (totalErr) {
+      return NextResponse.json({ error: totalErr.message }, { status: 400 });
+    }
 
     if (cpsErr) {
       return NextResponse.json({ error: cpsErr.message }, { status: 400 });
@@ -348,10 +364,9 @@ export async function GET(req: Request) {
       return sortDir === "asc" ? result : -result;
     });
 
-    const total = enriched.length;
+    const total = Number(totalCount ?? 0);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    const start = (page - 1) * pageSize;
-    const paged = enriched.slice(start, start + pageSize);
+    const paged = enriched;
 
     const output: ContactRow[] = paged.map((r: any) => ({
       id: r.id,
