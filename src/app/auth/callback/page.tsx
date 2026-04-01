@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import type { EmailOtpType } from "@supabase/supabase-js";
 
 function readHashParams() {
   if (typeof window === "undefined") return new URLSearchParams();
@@ -10,6 +11,13 @@ function readHashParams() {
     ? window.location.hash.slice(1)
     : window.location.hash;
   return new URLSearchParams(hash);
+}
+
+function getNextPath(type: string | null) {
+  if (type === "invite" || type === "recovery") {
+    return "/onboarding/account";
+  }
+  return "/dashboard";
 }
 
 export default function AuthCallbackPage() {
@@ -22,46 +30,67 @@ export default function AuthCallbackPage() {
     async function run() {
       try {
         const url = new URL(window.location.href);
+
         const queryType = url.searchParams.get("type");
         const queryCode = url.searchParams.get("code");
+        const tokenHash = url.searchParams.get("token_hash");
+        const next = getNextPath(queryType);
 
+        // 1) PKCE/code flow
         if (queryCode) {
           const { error } = await supabase.auth.exchangeCodeForSession(queryCode);
           if (error) throw error;
 
           if (!cancelled) {
-            router.replace("/dashboard");
+            router.replace(next);
           }
           return;
         }
 
-        const hashParams = readHashParams();
-        const access_token = hashParams.get("access_token");
-        const refresh_token = hashParams.get("refresh_token");
-        const type = hashParams.get("type") || queryType;
-
-        if (access_token && refresh_token) {
-          const { error } = await supabase.auth.setSession({
-            access_token,
-            refresh_token,
+        // 2) token_hash flow (common for invite/recovery links)
+        if (tokenHash && queryType) {
+          const { error } = await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type: queryType as EmailOtpType,
           });
 
           if (error) throw error;
 
           if (!cancelled) {
-            if (type === "invite" || type === "recovery") {
-              router.replace("/onboarding/account");
-            } else {
-              router.replace("/dashboard");
-            }
+            router.replace(next);
           }
           return;
         }
 
-        const { data } = await supabase.auth.getSession();
+        // 3) Legacy/hash token flow
+        const hashParams = readHashParams();
+        const accessToken = hashParams.get("access_token");
+        const refreshToken = hashParams.get("refresh_token");
+        const hashType = hashParams.get("type");
+        const resolvedType = hashType || queryType;
+        const resolvedNext = getNextPath(resolvedType);
+
+        if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+          if (error) throw error;
+
+          if (!cancelled) {
+            router.replace(resolvedNext);
+          }
+          return;
+        }
+
+        // 4) Existing session fallback
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+
         if (data.session) {
           if (!cancelled) {
-            router.replace("/dashboard");
+            router.replace(next);
           }
           return;
         }
